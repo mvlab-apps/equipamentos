@@ -5,7 +5,9 @@ export { html, render, useState, useEffect, useMemo, useRef, useCallback };
 const CFG = window.MVLAB_CONFIG || {};
 export const EMPRESA = CFG.empresa || 'MV LAB';
 export const configurado = !!(CFG.supabaseUrl && CFG.supabaseAnonKey && !/SEU-PROJETO|COLE-AQUI/.test(CFG.supabaseUrl + CFG.supabaseAnonKey));
-export const sb = configurado ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
+// aceita a URL colada com sobras comuns (/rest/v1, barra final, espaços)
+const URL_SB = (CFG.supabaseUrl || '').trim().replace(/\/(rest|auth)\/v1.*$/i, '').replace(/\/+$/, '');
+export const sb = configurado ? window.supabase.createClient(URL_SB, (CFG.supabaseAnonKey || '').trim()) : null;
 
 // ------------------------------------------------------------------ estado
 const state = {
