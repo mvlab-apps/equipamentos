@@ -2,9 +2,10 @@ import {
   html, useState, useEffect, useMemo, sb, store, useStore, ir, q, acao, toast, confirmar, msgErro, isAdmin,
   STATUS, CONDICAO, TIPO_ANEXO, CATEGORIAS_SUGERIDAS, fmtData, fmtMoeda, fmtRelativo, hojeISO, numeroBR, dataBR, normalizar,
   Icone, Badge, Campo, Modal, Vazio, Busca, Foto, urlArquivo, enviarArquivo, qrSvg, urlItem, imprimir, lerCSV, gerarCSV, baixar,
-  Responsavel, EMPRESA, recarregarEmBreve, carregarTudo,
+  EMPRESA, recarregarEmBreve, carregarTudo, nomePessoa, pessoasAtivas, minhaPessoa, GRUPOS,
 } from './core.js';
 import { buscarEquip } from './picker.js';
+import { MoverModal } from './quadro.js';
 
 const CAMPOS_TEXTO = ['codigo', 'nome', 'categoria', 'marca', 'modelo', 'numero_serie', 'localizacao', 'proprietario', 'fornecedor', 'nf_numero', 'seguro_apolice', 'tags', 'observacoes'];
 
@@ -14,6 +15,8 @@ export function ListaEquipamentos({ query }) {
   const [termo, setTermo] = useState(query.q || '');
   const [status, setStatus] = useState(query.status || 'ativos');
   const [cat, setCat] = useState(query.categoria || '');
+  const [pessoa, setPessoa] = useState(query.pessoa || '');
+  const [mover, setMover] = useState(null);
   const [sel, setSel] = useState(new Set());
   const [form, setForm] = useState(null);
   const [importar, setImportar] = useState(false);
@@ -24,27 +27,30 @@ export function ListaEquipamentos({ query }) {
   const lista = useMemo(() => {
     let l = st.equipamentos;
     if (status === 'ativos') l = l.filter((e) => e.status !== 'baixado');
-    else if (status === 'atrasado') l = l.filter((e) => e.status === 'em_uso' && e.atrasado);
-    else if (status === 'reservado') l = l.filter((e) => e.reserva_id);
+    else if (status === 'atrasado') l = l.filter((e) => e.atrasado);
+    else if (status === 'emprestado') l = l.filter((e) => e.emprestado && e.portador_id);
+    else if (status === 'base') l = l.filter((e) => !e.portador_id && e.status !== 'baixado');
+    else if (status === 'job') l = l.filter((e) => e.job_id);
     else if (status !== 'todos') l = l.filter((e) => e.status === status);
-    if (cat) l = l.filter((e) => e.categoria === cat);
+    if (cat) l = l.filter((e) => e.categoria === cat || e.grupo === cat);
+    if (pessoa) l = l.filter((e) => (pessoa === 'base' ? !e.portador_id : e.portador_id === pessoa));
     const hoje = hojeISO(); const lim = hojeISO(new Date(Date.now() + 60 * 86400000));
     if (alerta === 'garantia') l = l.filter((e) => e.garantia_ate && e.garantia_ate >= hoje && e.garantia_ate <= lim);
     if (alerta === 'sem_nf') l = l.filter((e) => !e.nf_numero && e.status !== 'baixado');
     if (alerta === 'sem_valor') l = l.filter((e) => (e.valor_compra === null || e.valor_compra === undefined) && e.status !== 'baixado');
     if (alerta === 'sem_serie') l = l.filter((e) => !e.numero_serie && Number(e.valor_compra) >= 500 && e.status !== 'baixado');
     return buscarEquip(l, termo);
-  }, [st.equipamentos, termo, status, cat, alerta]);
+  }, [st.equipamentos, termo, status, cat, alerta, pessoa]);
 
-  const conta = (s) => st.equipamentos.filter((e) => (s === 'ativos' ? e.status !== 'baixado' : s === 'atrasado' ? e.status === 'em_uso' && e.atrasado : s === 'reservado' ? e.reserva_id : e.status === s)).length;
-  const chips = [['ativos', 'Todos'], ['disponivel', 'Disponíveis'], ['em_uso', 'Em uso'], ['atrasado', 'Atrasados'], ['reservado', 'Com reserva'], ['manutencao', 'Manutenção'], ['extraviado', 'Extraviados'], ['baixado', 'Baixados']];
+  const conta = (s) => st.equipamentos.filter((e) => (s === 'ativos' ? e.status !== 'baixado' : s === 'atrasado' ? e.atrasado : s === 'emprestado' ? e.emprestado && e.portador_id : s === 'base' ? !e.portador_id && e.status !== 'baixado' : s === 'job' ? e.job_id : e.status === s)).length;
+  const chips = [['ativos', 'Todos'], ['base', 'Na base'], ['emprestado', 'Emprestados'], ['atrasado', 'Atrasados'], ['job', 'Em job futuro'], ['manutencao', 'Manutenção'], ['extraviado', 'Extraviados'], ['baixado', 'Baixados']];
   const toggle = (id) => { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); setSel(s); };
   const todosSel = lista.length > 0 && lista.every((e) => sel.has(e.id));
 
   const exportar = () => {
-    const cab = ['codigo', 'nome', 'categoria', 'marca', 'modelo', 'numero_serie', 'status', 'condicao', 'localizacao', 'proprietario', 'valor_compra', 'valor_locacao', 'data_compra', 'fornecedor', 'nf_numero', 'garantia_ate', 'seguro_apolice', 'tags', 'kit', 'com_quem', 'projeto', 'previsao_retorno', 'observacoes'];
+    const cab = ['codigo', 'nome', 'grupo', 'categoria', 'marca', 'modelo', 'numero_serie', 'status', 'condicao', 'titular', 'com_quem', 'emprestado_ate', 'localizacao', 'proprietario', 'valor_compra', 'valor_locacao', 'data_compra', 'fornecedor', 'nf_numero', 'garantia_ate', 'seguro_apolice', 'tags', 'kit', 'observacoes'];
     const br = (v) => (v === null || v === undefined ? '' : String(v).replace('.', ','));
-    const linhas = lista.map((e) => [e.codigo, e.nome, e.categoria, e.marca, e.modelo, e.numero_serie, STATUS[e.status], CONDICAO[e.condicao], e.localizacao, e.proprietario, br(e.valor_compra), br(e.valor_locacao), e.data_compra, e.fornecedor, e.nf_numero, e.garantia_ate, e.seguro_apolice, e.tags, e.kit_nome, e.responsavel_nome, e.projeto, e.previsao_retorno ? fmtData(e.previsao_retorno, true) : '', e.observacoes]);
+    const linhas = lista.map((e) => [e.codigo, e.nome, e.grupo, e.categoria, e.marca, e.modelo, e.numero_serie, STATUS[e.status], CONDICAO[e.condicao], e.titular_nome || 'Base', e.portador_nome || 'Base', e.emprestado && e.emprestimo_ate ? fmtData(e.emprestimo_ate, true) : '', e.localizacao, e.proprietario, br(e.valor_compra), br(e.valor_locacao), e.data_compra, e.fornecedor, e.nf_numero, e.garantia_ate, e.seguro_apolice, e.tags, e.kit_nome, e.observacoes]);
     baixar(`equipamentos-${hojeISO()}.csv`, gerarCSV(cab, linhas));
   };
   const etiquetas = () => {
@@ -63,25 +69,28 @@ export function ListaEquipamentos({ query }) {
     <div class="stack" style="margin-bottom:14px">
       <div class="row"><${Busca} valor=${termo} onInput=${setTermo} placeholder="Buscar por nome, código, marca, série, tag…" />
         <select class="input" style="width:auto;min-width:170px" value=${cat} onChange=${(e) => setCat(e.target.value)}>
-          <option value="">Todas as categorias</option>${categorias.map((c) => html`<option>${c}</option>`)}</select></div>
+          <option value="">Todas as categorias</option>${GRUPOS.filter((g) => st.equipamentos.some((e) => e.grupo === g)).map((g) => html`<optgroup label=${g}><option value=${g}>${g} (todas)</option>${categorias.filter((c) => st.equipamentos.some((e) => e.categoria === c && e.grupo === g)).map((c) => html`<option value=${c}>${c}</option>`)}</optgroup>`)}</select>
+        <select class="input" style="width:auto;min-width:160px" value=${pessoa} onChange=${(e) => setPessoa(e.target.value)}>
+          <option value="">Com qualquer pessoa</option><option value="base">Na base</option>${pessoasAtivas().map((p) => html`<option value=${p.id}>Com ${p.nome}</option>`)}</select></div>
       <div class="chips">${chips.map(([k, r]) => html`<button class=${'chip' + (status === k ? ' on' : '')} onClick=${() => setStatus(k)}>${r} <span class="n">${conta(k)}</span></button>`)}</div>
     </div>
     ${sel.size > 0 && html`<div class="alert info row between" style="margin-bottom:12px"><span>${sel.size} selecionado(s)</span>
       <div class="row"><button class="btn sm" onClick=${etiquetas}><${Icone} n="qr" s=${15} />Imprimir etiquetas</button>
-        <button class="btn sm" onClick=${() => { const ids = [...sel].filter((id) => store.get().equipamentos.find((e) => e.id === id)?.status === 'disponivel'); ir('/saida/nova?itens=' + ids.join(',')); }}><${Icone} n="saida" s=${15} />Retirar selecionados</button>
+        <button class="btn sm" onClick=${() => setMover([...sel].map((id) => ({ equipamento_id: id, kit_id: store.get().equipamentos.find((e) => e.id === id)?.kit_id })))}><${Icone} n="saida" s=${15} />Mover selecionados</button>
         <button class="btn ghost sm" onClick=${() => setSel(new Set())}>Limpar</button></div></div>`}
     <div class="card flush tbl-wrap">
       <table class="tbl"><thead><tr>
         <th style="width:36px"><input type="checkbox" class="check" checked=${todosSel} onChange=${() => setSel(todosSel ? new Set() : new Set(lista.map((e) => e.id)))} aria-label="Selecionar todos" /></th>
-        <th>Equipamento</th><th class="hide-m">Categoria</th><th>Status</th><th class="hide-m">Com quem / onde</th>${isAdmin() && html`<th class="hide-m right">Valor</th>`}
+        <th>Equipamento</th><th class="hide-m">Categoria</th><th>Situação</th><th class="hide-m">Com quem</th>${isAdmin() && html`<th class="hide-m right">Valor</th>`}
       </tr></thead><tbody>
         ${lista.slice(0, 600).map((e) => html`<tr key=${e.id} class="click" onClick=${() => ir('/equipamento/' + e.id)}>
           <td onClick=${(ev) => ev.stopPropagation()}><input type="checkbox" class="check" checked=${sel.has(e.id)} onChange=${() => toggle(e.id)} aria-label=${'Selecionar ' + e.codigo} /></td>
           <td style="min-width:200px"><div style="font-weight:550">${e.nome}</div><div class="small muted"><span class="mono">${e.codigo}</span>${e.marca ? ' · ' + e.marca : ''}${e.kit_nome ? ' · ' + e.kit_nome : ''}</div></td>
           <td class="hide-m">${e.categoria}</td>
           <td><${Badge} e=${e} /></td>
-          <td class="hide-m small">${e.status === 'em_uso' ? html`<b style="font-weight:550">${e.responsavel_nome}</b>${e.projeto ? html`<div class="muted">${e.projeto}</div>` : ''}`
-            : html`<span class="muted">${e.localizacao || '—'}${e.reserva_inicio ? html`<div style="color:var(--res)">Reserva ${fmtData(e.reserva_inicio)}: ${e.reserva_titulo}</div>` : ''}</span>`}</td>
+          <td class="hide-m small">${e.portador_id ? html`<b style="font-weight:550">${e.portador_nome}</b>` : html`<span class="muted">Base${e.localizacao ? ' · ' + e.localizacao : ''}</span>`}
+            ${e.emprestado && e.titular_id ? html`<div class="muted">de ${e.titular_nome}${e.emprestimo_ate ? ', volta ' + fmtData(e.emprestimo_ate) : ''}</div>` : ''}
+            ${e.job_id ? html`<div style="color:var(--res)">${fmtData(e.job_inicio)}: ${e.job_titulo}</div>` : ''}</td>
           ${isAdmin() && html`<td class="hide-m right nowrap">${fmtMoeda(e.valor_compra)}</td>`}
         </tr>`)}
       </tbody></table>
@@ -89,6 +98,7 @@ export function ListaEquipamentos({ query }) {
     </div>
     ${form && html`<${FormEquipamento} inicial=${form} onClose=${() => setForm(null)} />`}
     ${importar && html`<${Importar} onClose=${() => setImportar(false)} />`}
+    ${mover && html`<${MoverModal} itens=${mover} onClose=${() => setMover(null)} onFeito=${() => setSel(new Set())} />`}
   </div>`;
 }
 
@@ -103,7 +113,7 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
   const st = useStore();
   const editando = !!inicial.id;
   const [f, setF] = useState(() => ({
-    codigo: '', nome: '', categoria: '', marca: '', modelo: '', numero_serie: '', status: 'disponivel', condicao: 'bom',
+    codigo: '', nome: '', categoria: '', marca: '', modelo: '', numero_serie: '', status: 'ok', condicao: 'bom', titular_id: '',
     localizacao: '', proprietario: 'MV LAB', valor_compra: '', valor_locacao: '', data_compra: '', fornecedor: '', nf_numero: '',
     garantia_ate: '', seguro_apolice: '', tags: '', observacoes: '', kit_id: '', ...Object.fromEntries(Object.entries(inicial).map(([k, v]) => [k, v ?? ''])),
   }));
@@ -124,6 +134,7 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
       reg.categoria = reg.categoria || 'Outros'; reg.proprietario = reg.proprietario || 'MV LAB';
       if (!editando && !reg.codigo) delete reg.codigo;
       reg.status = f.status; reg.condicao = f.condicao;
+      if (!editando && f.titular_id) { reg.titular_id = f.titular_id; reg.portador_id = f.titular_id; }
       reg.valor_compra = numeroBR(f.valor_compra); reg.valor_locacao = numeroBR(f.valor_locacao);
       reg.data_compra = f.data_compra || null; reg.garantia_ate = f.garantia_ate || null;
       if (foto) reg.foto_path = await enviarArquivo(foto, 'fotos');
@@ -163,8 +174,10 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
         <${Campo} rotulo="Tags (busca)" cls="span-2"><input class="input" value=${f.tags} onInput=${set('tags')} placeholder="ex.: lapela, wireless, 2.4ghz" /><//>
       </div></div>
       <div><h3 style="margin-bottom:10px">Situação</h3><div class="grid-form">
-        <${Campo} rotulo="Status"><select class="input" value=${f.status} onChange=${set('status')} disabled=${f.status === 'em_uso'}>
-          ${Object.entries(STATUS).filter(([k]) => k !== 'em_uso' || f.status === 'em_uso').map(([k, v]) => html`<option value=${k}>${v}</option>`)}</select><//>
+        <${Campo} rotulo="Status"><select class="input" value=${f.status} onChange=${set('status')}>
+          ${Object.entries(STATUS).map(([k, v]) => html`<option value=${k}>${v}</option>`)}</select><//>
+        ${!editando && html`<${Campo} rotulo="Fica com (titular)"><select class="input" value=${f.titular_id} onChange=${set('titular_id')}>
+          <option value="">Base</option>${pessoasAtivas().map((p) => html`<option value=${p.id}>${p.nome}</option>`)}</select><//>`}
         <${Campo} rotulo="Condição"><select class="input" value=${f.condicao} onChange=${set('condicao')}>${Object.entries(CONDICAO).map(([k, v]) => html`<option value=${k}>${v}</option>`)}</select><//>
         <${Campo} rotulo="Localização na base"><input class="input" list="dl-loc" value=${f.localizacao} onInput=${set('localizacao')} placeholder="Prateleira, case, sala…" /><//>
         <${Campo} rotulo="Proprietário"><input class="input" value=${f.proprietario} onInput=${set('proprietario')} placeholder="MV LAB ou terceiro (sublocado)" /><//>
@@ -198,12 +211,15 @@ export function DetalheEquipamento({ id }) {
   const [aba, setAba] = useState('info');
   const [editar, setEditar] = useState(false);
   const [problema, setProblema] = useState(false);
+  const [mover, setMover] = useState(null);
   if (!e) return html`<${Vazio} titulo="Equipamento não encontrado"><a href="#/equipamentos">Voltar</a><//>`;
-  const reservas = st.reservas.filter((r) => r.reserva_itens.some((i) => i.equipamento_id === e.id));
+  const jobs = st.jobs.filter((j) => j.status === 'ativo' && new Date(j.fim) >= new Date() && (j.job_itens || []).some((i) => i.equipamento_id === e.id));
+  const eu = minhaPessoa();
+  const itemMov = [{ equipamento_id: e.id, kit_id: e.kit_id }];
   const manut = st.manutencoes.filter((m) => m.equipamento_id === e.id);
 
   const excluir = async () => {
-    if (!(await confirmar(`Excluir ${e.codigo} · ${e.nome} definitivamente?\nO histórico de saídas impede a exclusão de itens já movimentados — nesse caso use o status "Baixado".`, { perigo: true, ok: 'Excluir' }))) return;
+    if (!(await confirmar(`Excluir ${e.codigo} · ${e.nome} definitivamente?\nO histórico de movimentações impede a exclusão de itens já movimentados — nesse caso use o status "Baixado".`, { perigo: true, ok: 'Excluir' }))) return;
     if (await acao(() => q(sb.from('equipamentos').delete().eq('id', e.id)), 'Equipamento excluído.')) ir('/equipamentos');
   };
 
@@ -212,17 +228,18 @@ export function DetalheEquipamento({ id }) {
     <div class="page-head"><div><div class="row" style="gap:8px"><h1>${e.nome}</h1><${Badge} e=${e} /></div>
       <p><span class="mono">${e.codigo}</span> · ${e.categoria}${e.marca ? ' · ' + e.marca : ''}${e.modelo ? ' ' + e.modelo : ''}</p></div>
       <div class="row">
-        ${e.status === 'disponivel' && html`<a class="btn primary" href=${'#/saida/nova?itens=' + e.id}><${Icone} n="saida" s=${16} />Retirar</a>`}
-        ${e.status === 'em_uso' && html`<a class="btn primary" href=${'#/saida/' + e.retirada_id}><${Icone} n="volta" s=${16} />Devolver</a>`}
+        ${eu && e.portador_id !== eu.id && e.status !== 'baixado' && html`<button class="btn primary" onClick=${() => setMover({ para: eu.id })}><${Icone} n="usuario" s=${16} />Está comigo agora</button>`}
+        ${e.emprestado && e.portador_id && html`<button class="btn" onClick=${() => setMover({ tipo: 'devolver' })}><${Icone} n="volta" s=${16} />Devolver a ${e.titular_nome ? e.titular_nome.split(' ')[0] : 'base'}</button>`}
+        <button class="btn" onClick=${() => setMover({})}><${Icone} n="saida" s=${16} />Mover</button>
         <button class="btn" onClick=${() => setProblema(true)}><${Icone} n="alerta" s=${16} />Reportar problema</button>
         <button class="btn icon" title="Imprimir etiqueta" onClick=${() => imprimirEtiquetas([e])}><${Icone} n="qr" /></button>
         ${isAdmin() && html`<button class="btn icon" title="Editar" onClick=${() => setEditar(true)}><${Icone} n="editar" /></button>`}
       </div></div>
 
-    ${e.status === 'em_uso' && html`<div class=${'alert ' + (e.atrasado ? 'bad' : 'info')} style="margin-bottom:16px"><${Icone} n="usuario" />
-      <div>Com <b>${e.responsavel_nome}</b>${e.projeto ? ' · ' + e.projeto : ''} desde ${fmtData(e.saida_em, true)}.
-      ${e.previsao_retorno ? html` Retorno previsto ${fmtData(e.previsao_retorno, true)} (${fmtRelativo(e.previsao_retorno)}).` : ' Sem previsão de retorno.'}
-      <a href=${'#/saida/' + e.retirada_id}> Saída #${e.retirada_numero}</a></div></div>`}
+    <div class=${'alert ' + (e.atrasado ? 'bad' : e.emprestado && e.portador_id ? 'warn' : 'info')} style="margin-bottom:16px"><${Icone} n="usuario" />
+      <div>${e.portador_id ? html`Com <b>${e.portador_nome}</b>` : html`<b>Na base</b>${e.localizacao ? ' · ' + e.localizacao : ''}`}${e.posse_desde ? ` desde ${fmtData(e.posse_desde)}` : ''}.
+        ${e.titular_id ? html` Titular: <b>${e.titular_nome}</b>.` : ''}
+        ${e.emprestado && e.portador_id ? html` Emprestado${e.emprestimo_projeto ? ' para ' + e.emprestimo_projeto : ''}${e.emprestimo_ate ? `, volta ${fmtData(e.emprestimo_ate, true)} (${fmtRelativo(e.emprestimo_ate)})` : ''}.` : ''}</div></div>
 
     <div class="cols-2-1">
       <div>
@@ -234,7 +251,8 @@ export function DetalheEquipamento({ id }) {
             <div><span>Código</span><b class="mono">${e.codigo}</b></div>
             <div><span>Nº de série</span><b class="mono">${e.numero_serie || '—'}</b></div>
             <div><span>Condição</span><b>${CONDICAO[e.condicao]}</b></div>
-            <div><span>Localização</span><b>${e.localizacao || '—'}</b></div>
+            <div><span>Grupo / categoria</span><b>${e.grupo} · ${e.categoria}</b></div>
+            <div><span>Localização na base</span><b>${e.localizacao || '—'}</b></div>
             <div><span>Kit</span><b>${e.kit_id ? html`<a href=${'#/kit/' + e.kit_id}>${e.kit_nome}</a>` : '—'}</b></div>
             <div><span>Proprietário</span><b>${e.proprietario}</b></div>
             <div><span>Diária de locação</span><b>${fmtMoeda(e.valor_locacao)}</b></div>
@@ -253,15 +271,16 @@ export function DetalheEquipamento({ id }) {
       </div>
       <div class="stack lg">
         <${Foto} path=${e.foto_path} />
-        <div class="card"><div class="card-head"><h3>Reservas</h3></div>
-          ${reservas.length ? html`<div class="stack" style="gap:8px">${reservas.map((r) => html`<a href=${'#/reservas?ver=' + r.id} class="row nw" key=${r.id}><span class="badge b-reservado plain">${fmtData(r.inicio)}${r.fim !== r.inicio ? '–' + fmtData(r.fim) : ''}</span><span class="ellipsis">${r.titulo}</span></a>`)}</div>`
-            : html`<div class="muted small">Nenhuma reserva futura.</div>`}</div>
+        <div class="card"><div class="card-head"><h3>Próximos jobs</h3></div>
+          ${jobs.length ? html`<div class="stack" style="gap:8px">${jobs.map((j) => html`<a href=${'#/job/' + j.id} class="row nw" key=${j.id}><span class="badge b-emprestado plain">${fmtData(j.inicio)}</span><span class="ellipsis">${j.titulo}</span></a>`)}</div>`
+            : html`<div class="muted small">Não está escalado em nenhum job.</div>`}</div>
         ${manut.filter((m) => m.status === 'aberta').map((m) => html`<div class="alert warn" key=${m.id}><${Icone} n="chave" /><div><b>Manutenção aberta</b> desde ${fmtData(m.aberta_em)}<br />${m.descricao}</div></div>`)}
         ${isAdmin() && html`<button class="btn danger sm" style="align-self:flex-start" onClick=${excluir}><${Icone} n="lixo" s=${15} />Excluir item</button>`}
       </div>
     </div>
     ${editar && html`<${FormEquipamento} inicial=${e} onClose=${() => setEditar(false)} onSalvo=${() => {}} />`}
     ${problema && html`<${ReportarProblema} eq=${e} onClose=${() => setProblema(false)} />`}
+    ${mover && html`<${MoverModal} itens=${itemMov} para=${mover.para} tipo=${mover.tipo} onClose=${() => setMover(null)} />`}
   </div>`;
 }
 
@@ -270,7 +289,7 @@ export function ReportarProblema({ eq, onClose }) {
   const enviar = async () => { if (await acao(() => q(sb.rpc('abrir_manutencao', { p_equipamento_id: eq.id, p_descricao: d })), 'Problema registrado. O item foi para manutenção.')) onClose(); };
   return html`<${Modal} titulo=${'Reportar problema · ' + eq.codigo} onClose=${onClose} rodape=${html`<button class="btn" onClick=${onClose}>Cancelar</button><button class="btn primary" disabled=${!d.trim()} onClick=${enviar}>Registrar</button>`}>
     <div class="stack"><${Campo} rotulo="O que aconteceu?"><textarea class="input" value=${d} onInput=${(e) => setD(e.target.value)} placeholder="Ex.: sapata quebrada, cooler fazendo barulho, faltando cabo…" autofocus></textarea><//>
-    <div class="small muted">${eq.status === 'disponivel' ? 'O item ficará indisponível (status Manutenção) até um admin concluir o reparo.' : 'O item continua com quem está; a manutenção fica registrada.'}</div></div><//>`;
+    <div class="small muted">${eq.status === 'ok' ? 'O item ficará indisponível (status Manutenção) até um admin concluir o reparo.' : 'A manutenção fica registrada.'}</div></div><//>`;
 }
 
 function Anexos({ eq }) {
@@ -342,9 +361,10 @@ const ALIAS = {
   seguro_apolice: ['seguro_apolice', 'seguro', 'apólice', 'apolice'],
   tags: ['tags', 'palavras-chave', 'palavras chave'],
   kit: ['kit'],
+  titular: ['titular', 'com quem', 'com_quem', 'responsavel', 'responsável', 'fica com', 'posse', 'pessoa'],
   observacoes: ['observacoes', 'observações', 'obs', 'notas'],
 };
-const STATUS_ALIAS = { 'disponivel': 'disponivel', 'em uso': 'em_uso', 'em_uso': 'em_uso', 'manutencao': 'manutencao', 'em manutencao': 'manutencao', 'extraviado': 'extraviado', 'perdido': 'extraviado', 'baixado': 'baixado', 'vendido': 'baixado' };
+const STATUS_ALIAS = { 'disponivel': 'ok', 'ok': 'ok', 'operacional': 'ok', 'em uso': 'ok', 'em_uso': 'ok', 'manutencao': 'manutencao', 'em manutencao': 'manutencao', 'extraviado': 'extraviado', 'perdido': 'extraviado', 'baixado': 'baixado', 'vendido': 'baixado' };
 
 function Importar({ onClose }) {
   const st = useStore();
@@ -372,7 +392,7 @@ function Importar({ onClose }) {
       const st0 = normalizar(v(row, 'status') || '');
       return {
         codigo: v(row, 'codigo'), nome: v(row, 'nome'), categoria: v(row, 'categoria') || 'Outros', marca: v(row, 'marca'), modelo: v(row, 'modelo'),
-        numero_serie: v(row, 'numero_serie'), status: STATUS_ALIAS[st0] === 'em_uso' ? 'disponivel' : STATUS_ALIAS[st0] || 'disponivel',
+        numero_serie: v(row, 'numero_serie'), status: STATUS_ALIAS[st0] || 'ok', _pessoa: v(row, 'titular'),
         localizacao: v(row, 'localizacao'), proprietario: v(row, 'proprietario') || 'MV LAB',
         valor_compra: numeroBR(v(row, 'valor_compra')), valor_locacao: numeroBR(v(row, 'valor_locacao')),
         data_compra: dataBR(v(row, 'data_compra')), fornecedor: v(row, 'fornecedor'), nf_numero: v(row, 'nf_numero'),
@@ -390,9 +410,15 @@ function Importar({ onClose }) {
     setProg({ feito: 0, total: registros.length, erros: [] });
     const erros = []; let feito = 0;
     const kits = new Map(store.get().kits.map((k) => [normalizar(k.nome), k]));
+    const pessoasMap = new Map(store.get().pessoas.map((p) => [normalizar(p.nome), p]));
     const vinculos = [];
     for (const r of registros) {
-      const { _kit, ...reg } = r;
+      const { _kit, _pessoa, ...reg } = r;
+      if (_pessoa && !/^base$/i.test(_pessoa)) {
+        let p = pessoasMap.get(normalizar(_pessoa)) || [...pessoasMap.entries()].find(([n]) => n.split(' ')[0] === normalizar(_pessoa).split(' ')[0])?.[1];
+        if (!p) { try { p = await q(sb.from('pessoas').insert({ nome: _pessoa }).select().single()); pessoasMap.set(normalizar(_pessoa), p); } catch (_) {} }
+        if (p) { reg.titular_id = p.id; reg.portador_id = p.id; }
+      }
       Object.keys(reg).forEach((k) => reg[k] === null && k !== 'codigo' && delete reg[k]);
       if (!reg.codigo) delete reg.codigo;
       try {
@@ -419,14 +445,14 @@ function Importar({ onClose }) {
     toast(`Importação concluída: ${feito - erros.length} itens.`, erros.length ? 'erro' : 'ok');
   };
 
-  const modelo = () => baixar('modelo-importacao.csv', gerarCSV(['codigo', 'nome', 'categoria', 'marca', 'modelo', 'numero_serie', 'status', 'localizacao', 'proprietario', 'valor_compra', 'valor_locacao', 'data_compra', 'fornecedor', 'nf_numero', 'garantia_ate', 'seguro_apolice', 'tags', 'kit', 'observacoes'],
-    [['', 'Sony FX3', 'Câmera', 'Sony', 'ILME-FX3', '1234567', 'disponivel', 'Armário 1', 'MV LAB', '25000,00', '450,00', '15/03/2024', 'Loja X', '12345', '15/03/2025', '', 'cinema line, full frame', 'Kit Câmera A', 'Acompanha 2 baterias']]));
+  const modelo = () => baixar('modelo-importacao.csv', gerarCSV(['codigo', 'nome', 'categoria', 'marca', 'modelo', 'numero_serie', 'status', 'localizacao', 'proprietario', 'valor_compra', 'valor_locacao', 'data_compra', 'fornecedor', 'nf_numero', 'garantia_ate', 'seguro_apolice', 'tags', 'kit', 'observacoes', 'titular'],
+    [['', 'Sony FX3', 'Câmera', 'Sony', 'ILME-FX3', '1234567', 'ok', 'Armário 1', 'MV LAB', '25000,00', '450,00', '15/03/2024', 'Loja X', '12345', '15/03/2025', '', 'cinema line, full frame', 'Kit Câmera A', 'Acompanha 2 baterias', 'Gian']]));
 
   return html`<${Modal} largo titulo="Importar planilha (CSV)" onClose=${prog && !prog.fim ? null : onClose}
     rodape=${prog?.fim ? html`<button class="btn primary" onClick=${onClose}>Fechar</button>`
       : html`<button class="btn" onClick=${onClose} disabled=${!!prog}>Cancelar</button><button class="btn primary" disabled=${!registros.length || !!prog} onClick=${importar}>Importar ${registros.length || ''} itens</button>`}>
     <div class="stack">
-      ${!linhas && html`<p class="muted" style="margin:0">Aceita CSV separado por ponto e vírgula ou vírgula (Excel/Google Sheets → Salvar como CSV). Colunas reconhecidas: nome (obrigatória), código, categoria, marca, modelo, nº série, status, local, valor, locação/diária, data de compra, fornecedor, nota fiscal, garantia, seguro, tags, kit, observações. Sem código, o sistema gera MV-0001, MV-0002…</p>
+      ${!linhas && html`<p class="muted" style="margin:0">Aceita CSV separado por ponto e vírgula ou vírgula (Excel/Google Sheets → Salvar como CSV). Colunas reconhecidas: nome (obrigatória), código, categoria, marca, modelo, nº série, status, local, valor, locação/diária, data de compra, fornecedor, nota fiscal, garantia, seguro, tags, kit, titular (com quem fica — ex.: "Gian"; vazio = base), observações. Sem código, o sistema gera MV-0001, MV-0002…</p>
         <div class="row"><label class="btn primary"><${Icone} n="subir" s=${16} />Escolher arquivo CSV<input type="file" class="hidden" accept=".csv,text/csv" onChange=${ler} /></label>
         <button class="btn ghost" onClick=${modelo}><${Icone} n="baixar" s=${16} />Baixar modelo</button></div>`}
       ${linhas && !prog && html`

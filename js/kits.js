@@ -1,19 +1,22 @@
 import {
   html, useState, useMemo, sb, useStore, ir, q, acao, toast, confirmar, isAdmin, normalizar,
-  Icone, Badge, Campo, Modal, Vazio, Busca, qrSvg, urlKit, imprimir, EMPRESA, carregarTudo,
+  Icone, Badge, Campo, Modal, Vazio, Busca, qrSvg, urlKit, imprimir, EMPRESA, carregarTudo, nomePessoa, TIPOS_KIT,
 } from './core.js';
+import { MoverModal } from './quadro.js';
 import { buscarEquip } from './picker.js';
 import { imprimirEtiquetas } from './equipamentos.js';
 
 function resumoKit(k, eqs) {
-  const m = eqs.filter((e) => e.kit_id === k.id);
-  const disp = m.filter((e) => e.status === 'disponivel').length;
-  const uso = m.filter((e) => e.status === 'em_uso').length;
-  let sit = 'disponivel', rot = 'Completo';
-  if (!m.length) { sit = 'baixado'; rot = 'Vazio'; }
-  else if (uso === m.length) { sit = 'em_uso'; rot = 'Em uso'; }
-  else if (disp < m.length) { sit = 'manutencao'; rot = `Parcial ${disp}/${m.length}`; }
-  return { membros: m, disp, uso, sit, rot };
+  const m = eqs.filter((e) => e.kit_id === k.id && e.status !== 'baixado');
+  const portadores = [...new Set(m.map((e) => e.portador_id || ''))];
+  const problemas = m.filter((e) => e.status !== 'ok').length;
+  let sit = 'com', rot;
+  if (!m.length) { sit = 'base'; rot = 'Vazio'; }
+  else if (portadores.length > 1) { sit = 'emprestado'; rot = 'Dividido entre ' + portadores.map((p) => nomePessoa(p || null).split(' ')[0]).join(', '); }
+  else if (!portadores[0]) { sit = 'base'; rot = 'Na base'; }
+  else rot = 'Com ' + nomePessoa(portadores[0]).split(' ')[0];
+  if (problemas) { sit = 'manutencao'; rot += ` · ${problemas} c/ problema`; }
+  return { membros: m, sit, rot };
 }
 
 export function ListaKits() {
@@ -28,7 +31,7 @@ export function ListaKits() {
     <div class="cols" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">
       ${lista.map((k) => { const r = resumoKit(k, st.equipamentos); return html`<a class="card" key=${k.id} href=${'#/kit/' + k.id} style="color:inherit;text-decoration:none">
         <div class="row between nw"><h3 class="ellipsis">${k.nome}</h3><span class=${'badge b-' + r.sit}>${r.rot}</span></div>
-        <div class="small muted" style="margin:4px 0 10px">${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens</div>
+        <div class="small muted" style="margin:4px 0 10px">${k.tipo ? html`<span class="badge b-gold plain">${k.tipo}</span> ` : ''}${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens${k.titular_id ? ' · titular ' + nomePessoa(k.titular_id) : ''}</div>
         <div class="small" style="color:var(--muted);line-height:1.6">${r.membros.slice(0, 5).map((e) => e.nome).join(' · ')}${r.membros.length > 5 ? ` · +${r.membros.length - 5}` : ''}</div>
       </a>`; })}
     </div>
@@ -38,16 +41,20 @@ export function ListaKits() {
 }
 
 function FormKit({ inicial, onClose }) {
-  const [f, setF] = useState({ nome: inicial.nome || '', codigo: inicial.codigo || '', descricao: inicial.descricao || '' });
+  const st = useStore();
+  const [f, setF] = useState({ nome: inicial.nome || '', codigo: inicial.codigo || '', descricao: inicial.descricao || '', tipo: inicial.tipo || '' });
+  const tipos = [...new Set([...TIPOS_KIT, ...st.kits.map((k) => k.tipo).filter(Boolean)])];
   const salvar = async () => {
     if (!f.nome.trim()) return toast('Informe o nome do kit.', 'erro');
-    const reg = { nome: f.nome.trim(), codigo: f.codigo.trim().toUpperCase() || null, descricao: f.descricao.trim() || null };
+    const reg = { nome: f.nome.trim(), codigo: f.codigo.trim().toUpperCase() || null, descricao: f.descricao.trim() || null, tipo: f.tipo.trim() || null };
     const r = await acao(() => inicial.id ? q(sb.from('kits').update(reg).eq('id', inicial.id).select().single()) : q(sb.from('kits').insert(reg).select().single()), 'Kit salvo.');
     if (r) { await carregarTudo(); onClose(); if (!inicial.id) ir('/kit/' + r.id); }
   };
   return html`<${Modal} titulo=${inicial.id ? 'Editar kit' : 'Novo kit'} onClose=${onClose} rodape=${html`<button class="btn" onClick=${onClose}>Cancelar</button><button class="btn primary" onClick=${salvar}>Salvar</button>`}>
     <div class="stack">
       <${Campo} rotulo="Nome" obrig><input class="input" value=${f.nome} onInput=${(e) => setF({ ...f, nome: e.target.value })} placeholder="Ex.: Kit Luz Amaran 1" autofocus /><//>
+      <${Campo} rotulo="Tipo (usado nos modelos de job)"><input class="input" list="dl-tipokit" value=${f.tipo} onInput=${(e) => setF({ ...f, tipo: e.target.value })} placeholder="Câmera, Luz, Áudio, Podcast…" />
+        <datalist id="dl-tipokit">${tipos.map((t) => html`<option value=${t} />`)}</datalist><//>
       <${Campo} rotulo="Código (para etiqueta)"><input class="input mono" value=${f.codigo} onInput=${(e) => setF({ ...f, codigo: e.target.value })} placeholder="Ex.: KIT-LUZ-1" /><//>
       <${Campo} rotulo="Descrição / checklist"><textarea class="input" value=${f.descricao} onInput=${(e) => setF({ ...f, descricao: e.target.value })} placeholder="O que deve voltar no case, ordem de montagem…"></textarea><//>
     </div><//>`;
@@ -73,13 +80,13 @@ export function DetalheKit({ id }) {
   };
   const etiqueta = () => imprimir(html`<div class="labels"><div class="label"><span dangerouslySetInnerHTML=${{ __html: qrSvg(urlKit(k.codigo || k.id)) }}></span>
     <div><div class="le">${EMPRESA} · KIT</div><div class="lc">${k.codigo || ''}</div><div class="ln">${k.nome} (${r.membros.length} itens)</div></div></div></div>`);
-  const disponiveis = r.membros.filter((e) => e.status === 'disponivel');
+  const [mover, setMover] = useState(false);
   return html`<div>
     <a class="crumb" href="#/kits">← Kits</a>
     <div class="page-head"><div><div class="row" style="gap:8px"><h1>${k.nome}</h1><span class=${'badge b-' + r.sit}>${r.rot}</span></div>
-      <p>${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens</p></div>
+      <p>${k.tipo ? k.tipo + ' · ' : ''}${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens${k.titular_id ? ' · titular ' + nomePessoa(k.titular_id) : ''}${!k.tipo && isAdmin() ? html` · <a href="#" onClick=${(ev) => { ev.preventDefault(); setEditar(true); }}>definir tipo</a>` : ''}</p></div>
       <div class="row">
-        ${disponiveis.length > 0 && html`<a class="btn primary" href=${'#/saida/nova?kit=' + k.id}><${Icone} n="saida" s=${16} />Retirar kit</a>`}
+        ${r.membros.length > 0 && html`<button class="btn primary" onClick=${() => setMover(true)}><${Icone} n="saida" s=${16} />Mover kit</button>`}
         <button class="btn" onClick=${() => (k.codigo ? etiqueta() : toast('Defina um código para o kit antes de imprimir a etiqueta.', 'erro'))}><${Icone} n="qr" s=${16} />Etiqueta do kit</button>
         <button class="btn" onClick=${() => r.membros.length && imprimirEtiquetas(r.membros)}><${Icone} n="impressora" s=${16} />Etiquetas dos itens</button>
         ${isAdmin() && html`<button class="btn icon" title="Editar" onClick=${() => setEditar(true)}><${Icone} n="editar" /></button>`}
@@ -88,13 +95,14 @@ export function DetalheKit({ id }) {
     <div class="card flush">
       <div class="card-head" style="padding:14px 16px 0"><h3>Itens do kit</h3>${isAdmin() && html`<button class="btn sm" onClick=${() => setAdd(true)}><${Icone} n="mais" s=${15} />Adicionar itens</button>`}</div>
       <div class="list">${r.membros.map((e) => html`<div class="li" key=${e.id}>
-        <a class="grow" href=${'#/equipamento/' + e.id} style="color:inherit"><div class="t">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span>${e.status === 'em_uso' ? ' · com ' + e.responsavel_nome : ''}</div></a>
+        <a class="grow" href=${'#/equipamento/' + e.id} style="color:inherit"><div class="t">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span>${' · ' + (e.portador_nome ? 'com ' + e.portador_nome : 'na base')}</div></a>
         <${Badge} e=${e} />
         ${isAdmin() && html`<button class="btn ghost sm icon" aria-label="Remover do kit" onClick=${() => remover(e)}><${Icone} n="x" s=${15} /></button>`}</div>`)}
         ${!r.membros.length && html`<${Vazio} titulo="Kit vazio">Adicione os equipamentos que compõem este kit.<//>`}</div>
     </div>
     ${isAdmin() && html`<button class="btn danger sm" style="margin-top:16px" onClick=${excluir}><${Icone} n="lixo" s=${15} />Excluir kit</button>`}
     ${editar && html`<${FormKit} inicial=${k} onClose=${() => setEditar(false)} />`}
+    ${mover && html`<${MoverModal} itens=${r.membros.map((e) => ({ equipamento_id: e.id, kit_id: k.id }))} onClose=${() => setMover(false)} />`}
     ${add && html`<${AdicionarAoKit} kit=${k} onClose=${() => setAdd(false)} />`}
   </div>`;
 }

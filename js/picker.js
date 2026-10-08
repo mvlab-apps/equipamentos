@@ -58,9 +58,9 @@ export function LeitorQR({ onLido, onClose }) {
 
 /**
  * itens: [{equipamento_id, kit_id}]
- * modo: 'saida' (só disponíveis) | 'reserva' (qualquer item ativo)
+ * modo: 'mover' (qualquer item não baixado) | 'job' (itens operacionais ou em manutenção)
  */
-export function SeletorItens({ itens, onChange, modo = 'saida', alertas = {} }) {
+export function SeletorItens({ itens, onChange, modo = 'mover', alertas = {} }) {
   const st = useStore();
   const [termo, setTermo] = useState('');
   const [aba, setAba] = useState('itens');
@@ -71,13 +71,13 @@ export function SeletorItens({ itens, onChange, modo = 'saida', alertas = {} }) 
   const gravar = (novo) => { atual.current.itens = novo; atual.current.onChange(novo); };
   const selIds = new Set(itens.map((i) => i.equipamento_id));
   const jaTem = (id) => lerItens().some((i) => i.equipamento_id === id);
-  const elegivel = (e) => (modo === 'saida' ? e.status === 'disponivel' : !['baixado', 'extraviado'].includes(e.status));
+  const elegivel = (e) => (modo === 'mover' ? e.status !== 'baixado' : !['baixado', 'extraviado'].includes(e.status));
 
   const resultados = useMemo(() => buscarEquip(st.equipamentos.filter((e) => e.status !== 'baixado'), termo).slice(0, 40), [st.equipamentos, termo]);
 
   const adicionar = (e, kit_id = null) => {
     if (jaTem(e.id)) return false;
-    if (!elegivel(e)) { toast(`${e.codigo} está ${e.status === 'em_uso' ? 'em uso com ' + (e.responsavel_nome || '?') : 'indisponível'}.`, 'erro'); return false; }
+    if (!elegivel(e)) { toast(`${e.codigo} está ${e.status === 'baixado' ? 'baixado' : 'indisponível'}.`, 'erro'); return false; }
     gravar([...lerItens(), { equipamento_id: e.id, kit_id }]); return true;
   };
   const adicionarKit = (k) => {
@@ -127,11 +127,11 @@ export function SeletorItens({ itens, onChange, modo = 'saida', alertas = {} }) 
         ${aba === 'itens' ? resultados.map((e) => {
           const ok = elegivel(e); const ja = selIds.has(e.id);
           return html`<div key=${e.id} class=${'li click' + (!ok || ja ? ' disabled-row' : '')} onClick=${() => !ja && adicionar(e)}>
-            <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''}${e.status === 'em_uso' ? ' · com ' + (e.responsavel_nome || '?') : ''}</div></div>
+            <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''} · ${e.portador_nome ? 'com ' + e.portador_nome : 'na base'}</div></div>
             ${ja ? html`<span class="badge b-gold plain">Na lista</span>` : html`<${Badge} e=${e} />`}
           </div>`;
         }) : kitsResumo.map((k) => html`<div key=${k.id} class=${'li click' + (k.disp === 0 ? ' disabled-row' : '')} onClick=${() => adicionarKit(k)}>
-            <div class="grow"><div class="t">${k.nome}</div><div class="s">${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${k.disp}/${k.total} ${modo === 'saida' ? 'disponíveis' : 'ativos'}</div></div>
+            <div class="grow"><div class="t">${k.nome}</div><div class="s">${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${k.total} itens${k.tipo ? ' · ' + k.tipo : ''}</div></div>
             <span class="btn sm">Adicionar kit</span></div>`)}
         ${aba === 'itens' && !resultados.length && html`<div class="empty">Nada encontrado.</div>`}
         ${aba === 'kits' && !kitsResumo.length && html`<div class="empty">Nenhum kit cadastrado.</div>`}

@@ -12,7 +12,7 @@ export const sb = configurado ? window.supabase.createClient(URL_SB, (CFG.supaba
 // ------------------------------------------------------------------ estado
 const state = {
   session: null, perfil: null, pronto: false, carregando: false,
-  equipamentos: [], kits: [], perfis: [], retiradas: [], reservas: [], manutencoes: [], config: {},
+  equipamentos: [], kits: [], perfis: [], pessoas: [], categorias: [], modelos: [], jobs: [], manutencoes: [], config: {},
   atualizadoEm: null,
 };
 const subs = new Set();
@@ -30,6 +30,13 @@ export const eqPorId = (id) => state.equipamentos.find((e) => e.id === id);
 export const kitPorId = (id) => state.kits.find((k) => k.id === id);
 export const perfilPorId = (id) => state.perfis.find((p) => p.id === id);
 export const nomePerfil = (p) => (p ? p.nome || p.email : '');
+export const pessoaPorId = (id) => state.pessoas.find((p) => p.id === id);
+export const nomePessoa = (id) => (id ? pessoaPorId(id)?.nome || '?' : 'Base');
+export const minhaPessoa = () => state.pessoas.find((p) => p.perfil_id && p.perfil_id === state.perfil?.id) || null;
+export const pessoasAtivas = () => state.pessoas.filter((p) => p.ativo).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR'));
+export const GRUPOS = ['Câmera', 'Luz', 'Maquinária', 'Áudio', 'Monitoramento e comunicação', 'Energia', 'Armazenamento e dados', 'Transporte', 'Outros'];
+export const grupoDe = (categoria) => state.categorias.find((c) => c.nome === categoria)?.grupo || 'Outros';
+export const TIPOS_KIT = ['Câmera', 'Luz', 'Áudio', 'Podcast', 'Drone', 'Comunicação', 'Monitoramento', 'Energia', 'Íon'];
 
 async function buscarTodos(fabrica) {
   const out = []; const passo = 1000;
@@ -46,17 +53,21 @@ export async function carregarTudo() {
   if (!sb || !state.perfil?.ativo) return;
   store.set({ carregando: true });
   try {
-    const [equipamentos, kits, perfis, retiradas, reservas, manutencoes, cfg] = await Promise.all([
+    const desde = new Date(Date.now() - 45 * 86400000).toISOString();
+    const ate = new Date(Date.now() + 150 * 86400000).toISOString();
+    const [equipamentos, kits, perfis, pessoas, categorias, modelos, jobs, manutencoes, cfg] = await Promise.all([
       buscarTodos(() => sb.from('v_equipamentos').select('*').order('codigo')),
       buscarTodos(() => sb.from('kits').select('*').order('nome')),
       buscarTodos(() => sb.from('perfis').select('*').order('nome')),
-      buscarTodos(() => sb.from('retiradas').select('*, retirada_itens(*)').is('encerrada_em', null).order('saida_em', { ascending: false })),
-      buscarTodos(() => sb.from('reservas').select('*, reserva_itens(*)').eq('status', 'ativa').gte('fim', hojeISO()).order('inicio')),
+      buscarTodos(() => sb.from('pessoas').select('*').order('ordem').order('nome')),
+      buscarTodos(() => sb.from('categorias').select('*').order('ordem')),
+      buscarTodos(() => sb.from('modelos').select('*, modelo_requisitos(*)').order('nome')),
+      buscarTodos(() => sb.from('jobs').select('*, job_itens(*)').gte('fim', desde).lte('inicio', ate).order('inicio')),
       buscarTodos(() => sb.from('manutencoes').select('*').order('criado_em', { ascending: false }).limit(500)),
       buscarTodos(() => sb.from('config').select('*')),
     ]);
     const config = {}; cfg.forEach((c) => (config[c.chave] = c.valor));
-    store.set({ equipamentos, kits, perfis, retiradas, reservas, manutencoes, config, atualizadoEm: new Date(), pronto: true });
+    store.set({ equipamentos, kits, perfis, pessoas, categorias, modelos, jobs, manutencoes, config, atualizadoEm: new Date(), pronto: true });
   } catch (e) {
     toast(msgErro(e), 'erro');
   } finally {
@@ -72,7 +83,7 @@ export function assinarTempoReal() {
   if (!sb || canal) return;
   try {
     canal = sb.channel('mudancas');
-    ['equipamentos', 'retiradas', 'reservas', 'manutencoes'].forEach((t) =>
+    ['equipamentos', 'jobs', 'job_itens', 'manutencoes', 'pessoas'].forEach((t) =>
       canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => recarregarEmBreve(600)));
     canal.subscribe();
   } catch (_) { /* tempo real é opcional */ }
@@ -92,9 +103,7 @@ export function useRota() {
 export const ir = (h) => { location.hash = h; };
 
 // ------------------------------------------------------------------ formatação
-export const STATUS = {
-  disponivel: 'Disponível', em_uso: 'Em uso', manutencao: 'Manutenção', extraviado: 'Extraviado', baixado: 'Baixado',
-};
+export const STATUS = { ok: 'Operacional', manutencao: 'Manutenção', extraviado: 'Extraviado', baixado: 'Baixado' };
 export const CONDICAO = { novo: 'Novo', bom: 'Bom', regular: 'Regular', danificado: 'Danificado' };
 export const TIPO_ANEXO = { nota_fiscal: 'Nota fiscal', foto: 'Foto', manual: 'Manual', garantia: 'Garantia', seguro: 'Seguro', outro: 'Outro' };
 export const CATEGORIAS_SUGERIDAS = ['Câmera', 'Lentes', 'Iluminação', 'Grip', 'Tripés e suportes', 'Rigagem', 'Áudio', 'Monitoramento', 'Filtros', 'Baterias', 'Energia e fontes', 'Cartões de memória', 'Cabos', 'Drone', 'Estabilizadores', 'Teleprompter', 'Bags e cases', 'Acessórios', 'Informática', 'Outros'];
@@ -151,10 +160,12 @@ export function msgErro(e) {
 
 // status "efetivo" para exibição (inclui reserva vigente hoje e atraso)
 export function statusExibicao(e) {
-  if (e.status === 'em_uso' && e.atrasado) return { cls: 'atrasado', rot: 'Atrasado' };
-  if (e.status === 'disponivel' && e.reserva_inicio && e.reserva_inicio <= hojeISO() && e.reserva_fim >= hojeISO())
-    return { cls: 'reservado', rot: 'Reservado hoje' };
-  return { cls: e.status, rot: STATUS[e.status] || e.status };
+  if (e.status && e.status !== 'ok') return { cls: e.status, rot: STATUS[e.status] || e.status };
+  if (e.atrasado) return { cls: 'atrasado', rot: 'Atrasado' };
+  if (e.emprestado && e.portador_id) return { cls: 'emprestado', rot: 'Emprestado' };
+  if (e.emprestado && !e.portador_id) return { cls: 'base', rot: 'Na base (de ' + (e.titular_nome || '?') + ')' };
+  if (!e.portador_id) return { cls: 'base', rot: 'Na base' };
+  return { cls: 'com', rot: 'Com ' + (e.portador_nome || '?').split(' ')[0] };
 }
 
 // ------------------------------------------------------------------ ícones (traço)

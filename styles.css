@@ -166,7 +166,10 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .badge { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.plain::before { display: none; }
-.b-disponivel { background: var(--ok-soft); color: var(--ok); }
+.b-disponivel, .b-ok { background: var(--ok-soft); color: var(--ok); }
+.b-base { background: var(--gray-soft); color: var(--muted); }
+.b-com { background: var(--use-soft); color: var(--use); }
+.b-emprestado { background: var(--res-soft); color: var(--res); }
 .b-em_uso { background: var(--use-soft); color: var(--use); }
 .b-reservado { background: var(--res-soft); color: var(--res); }
 .b-manutencao { background: var(--warn-soft); color: var(--warn); }
@@ -252,3 +255,42 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .doc .sign div { border-top: 1px solid #000; padding-top: 1.5mm; font-size: 9pt; text-align: center; }
   .doc .terms { font-size: 8.5pt; color: #333; margin-top: 5mm; }
 }
+
+/* ---------- quadro (kanban de posse) ---------- */
+.quadro { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: flex-start; scroll-snap-type: x proximity; }
+.qcol { overflow: hidden; flex: 0 0 292px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 230px); scroll-snap-align: start; transition: border-color .12s, background .12s; }
+.qcol.eu { border-color: rgba(231,181,83,.45); }
+.qcol.alvo { border-color: var(--gold); background: var(--surface-2); box-shadow: 0 0 0 3px var(--gold-soft); }
+.qhead { padding: 12px 12px 10px; border-bottom: 1px solid var(--border); }
+.qhead h3 { font-size: 14.5px; }
+.qbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.qitem { display: flex; gap: 8px; align-items: center; padding: 7px 9px; border-radius: 7px; background: var(--surface-2); border: 1px solid transparent; cursor: pointer; user-select: none; }
+.qitem:hover { border-color: var(--border-strong); }
+.qitem.sel { border-color: var(--gold); background: var(--gold-soft); }
+.qitem[draggable=true] { cursor: grab; }
+.qnome { font-size: 13px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qmeta { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qkit { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 4px; background: rgba(231,181,83,.03); }
+.qkit-h { min-width: 0; user-select: none; display: flex; align-items: center; gap: 6px; padding: 5px 6px; cursor: pointer; font-size: 13px; }
+.qkit-h .caret { color: var(--faint); width: 10px; }
+.qkit .qitem { background: var(--surface-3); }
+.qvazio { color: var(--faint); font-size: 12.5px; text-align: center; padding: 18px 6px; border: 1px dashed var(--border); border-radius: 8px; }
+.barra-sel { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 50; display: flex; gap: 10px; align-items: center; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 12px; padding: 8px 10px 8px 16px; box-shadow: var(--shadow); }
+@media (max-width: 860px) { .qcol { flex-basis: 84vw; max-height: none; } .barra-sel { bottom: 84px; } }
+.tbl.pivot td, .tbl.pivot th { padding: 8px 12px; font-variant-numeric: tabular-nums; }
+.tbl.pivot tr.grp td { background: var(--surface-2); }
+.tbl.pivot tr.tot td { border-top: 1px solid var(--border-strong); }
+
+/* ---------- jobs ---------- */
+.dia { font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: capitalize; padding: 14px 2px 6px; }
+.job { display: grid; grid-template-columns: 92px 1fr auto; gap: 12px; align-items: center; padding: 11px 16px; border-top: 1px solid var(--border); cursor: pointer; }
+.job:first-child { border-top: 0; }
+.job:hover { background: var(--surface-2); }
+.job .hora { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+.b-falta { background: var(--warn-soft); color: var(--warn); }
+.b-semmodelo, .b-semreq, .b-vazio { background: var(--gray-soft); color: var(--muted); }
+.req { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--border); }
+.req:first-child { border-top: 0; }
+@media (max-width: 600px) { .job { grid-template-columns: 1fr auto; } .job .hora { grid-column: 1 / -1; } }
+.qkit-h b { min-width: 0; } .qitem .grow { min-width: 0; } .qcol .qbody > * { min-width: 0; }
+.main.largo { max-width: none; }

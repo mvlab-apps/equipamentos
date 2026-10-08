@@ -2,13 +2,14 @@ import {
   html, render, useState, useEffect, sb, configurado, store, useStore, carregarTudo, assinarTempoReal, useRota, ir,
   Icone, Logo, Toasts, ConfirmHost, toast, msgErro, isAdmin, EMPRESA, q, acao, Campo, Modal,
 } from './core.js';
-import { Painel } from './painel.js';
+import { Quadro, MoverPagina } from './quadro.js';
 import { ListaEquipamentos, DetalheEquipamento, PorCodigo } from './equipamentos.js';
 import { ListaKits, DetalheKit, KitPorCodigo } from './kits.js';
-import { NovaSaida, ListaSaidas, DetalheSaida } from './saidas.js';
-import { Reservas } from './reservas.js';
+import { Jobs, DetalheJob } from './jobs.js';
+import { Movimentos } from './movimentos.js';
 import { Manutencao } from './manutencao.js';
-import { Equipe } from './equipe.js';
+import { Pessoas } from './pessoas.js';
+import { resumoJob, jobAtivo } from './cobertura.js';
 
 // ------------------------------------------------------------------ autenticação
 async function carregarPerfil(session) {
@@ -103,25 +104,27 @@ function Casca({ rota, children }) {
   const st = useStore();
   const [menu, setMenu] = useState(false);
   const [perfilAberto, setPerfilAberto] = useState(false);
-  const atrasadas = st.retiradas.filter((r) => r.previsao_retorno && new Date(r.previsao_retorno) < new Date()).length;
+  const atrasadas = st.equipamentos.filter((e) => e.atrasado).length;
+  const em7 = Date.now() + 7 * 86400000;
+  const jobsPend = st.jobs.filter((j) => jobAtivo(j) && new Date(j.fim) >= new Date() && new Date(j.inicio) <= em7).filter((j) => { const r = resumoJob(j); return r.estado === 'falta' || r.conflitos.length; }).length;
   const pendentes = isAdmin() ? st.perfis.filter((p) => !p.ativo).length : 0;
   const manAbertas = st.manutencoes.filter((m) => m.status === 'aberta').length;
-  const sec = rota.partes[0] || 'painel';
-  const ativo = (k) => (k === sec || (k === 'equipamentos' && ['equipamento', 'e'].includes(sec)) || (k === 'kits' && ['kit', 'k'].includes(sec)) || (k === 'saidas' && sec === 'saida' && rota.partes[1] !== 'nova') ? 'on' : '');
+  const sec = rota.partes[0] || 'quadro';
+  const ativo = (k) => (k === sec || (k === 'equipamentos' && ['equipamento', 'e'].includes(sec)) || (k === 'kits' && ['kit', 'k'].includes(sec)) || (k === 'jobs' && sec === 'job') ? 'on' : '');
   useEffect(() => setMenu(false), [rota.path]);
   const link = (k, n, rot, extra) => html`<a href=${'#/' + k} class=${ativo(k)}><${Icone} n=${n} />${rot}${extra ? html`<span class="count">${extra}</span>` : ''}</a>`;
   return html`<div class="app">
     <aside class=${'sidebar' + (menu ? ' open' : '')}>
       <div class="brand"><div class="brand-mark"><${Logo} /></div><div><div class="brand-name">${EMPRESA}</div><div class="brand-sub">Equipamentos</div></div></div>
-      <a href="#/saida/nova" class="btn primary block" style="margin:0 0 12px"><${Icone} n="saida" s=${16} />Nova saída</a>
+      <a href="#/mover" class="btn primary block" style="margin:0 0 12px"><${Icone} n="saida" s=${16} />Mover itens</a>
       <nav class="nav">
-        ${link('painel', 'painel', 'Painel')}
+        ${link('quadro', 'painel', 'Quadro')}
+        ${link('jobs', 'agenda', 'Jobs', jobsPend || '')}
         ${link('equipamentos', 'caixa', 'Equipamentos')}
         ${link('kits', 'kit', 'Kits')}
-        ${link('saidas', 'volta', 'Saídas e devoluções', atrasadas)}
-        ${link('reservas', 'agenda', 'Reservas')}
+        ${link('movimentos', 'volta', 'Movimentações', atrasadas || '')}
         ${link('manutencao', 'chave', 'Manutenção', manAbertas || '')}
-        ${isAdmin() && html`<div class="sep"></div>${link('equipe', 'equipe', 'Equipe e acesso', pendentes)}`}
+        <div class="sep"></div>${link('pessoas', 'equipe', isAdmin() ? 'Pessoas e acesso' : 'Pessoas', pendentes || '')}
       </nav>
       <div class="sidebar-foot stack" style="gap:8px">
         <button class="btn ghost" style="justify-content:flex-start;padding:0 6px" onClick=${() => setPerfilAberto(true)}><${Icone} n="usuario" s=${16} /><span class="ellipsis">${st.perfil?.nome || st.perfil?.email}</span></button>
@@ -133,14 +136,14 @@ function Casca({ rota, children }) {
     <div style="min-width:0">
       <div class="topbar-m"><button class="btn ghost icon" onClick=${() => setMenu(true)} aria-label="Menu"><${Icone} n="menu" /></button>
         <div class="row nw" style="gap:8px"><${Logo} /><b>${EMPRESA}</b></div><span class="small faint" style="width:36px">${st.carregando ? '⟳' : ''}</span></div>
-      <main class="main">${children}</main>
+      <main class=${'main' + (['quadro', 'painel', undefined].includes(rota.partes[0]) ? ' largo' : '')}>${children}</main>
     </div>
     <nav class="bottom-nav">
-      <a href="#/painel" class=${ativo('painel')}><${Icone} n="painel" />Painel</a>
+      <a href="#/quadro" class=${ativo('quadro')}><${Icone} n="painel" />Quadro</a>
+      <a href="#/jobs" class=${ativo('jobs')}><${Icone} n="agenda" />Jobs</a>
+      <a href="#/mover" class="fab"><${Icone} n="saida" />Mover</a>
       <a href="#/equipamentos" class=${ativo('equipamentos')}><${Icone} n="caixa" />Itens</a>
-      <a href="#/saida/nova" class="fab"><${Icone} n="saida" />Saída</a>
-      <a href="#/saidas" class=${ativo('saidas')}><${Icone} n="volta" />Devolver</a>
-      <a href="#/reservas" class=${ativo('reservas')}><${Icone} n="agenda" />Reservas</a>
+      <a href="#/movimentos" class=${ativo('movimentos')}><${Icone} n="volta" />Empréstimos</a>
     </nav>
     ${perfilAberto && html`<${MeuPerfil} onClose=${() => setPerfilAberto(false)} />`}
   </div>`;
@@ -149,19 +152,20 @@ function Casca({ rota, children }) {
 function Rotas({ rota }) {
   const [a, b, c] = rota.partes;
   switch (a) {
-    case undefined: case 'painel': return html`<${Painel} />`;
+    case undefined: case 'quadro': case 'painel': return html`<${Quadro} query=${rota.query} />`;
+    case 'mover': return html`<${MoverPagina} query=${rota.query} />`;
+    case 'jobs': return html`<${Jobs} query=${rota.query} />`;
+    case 'job': return html`<${DetalheJob} id=${b} />`;
+    case 'movimentos': return html`<${Movimentos} />`;
+    case 'pessoas': case 'equipe': return html`<${Pessoas} query=${rota.query} />`;
     case 'equipamentos': return html`<${ListaEquipamentos} query=${rota.query} />`;
     case 'equipamento': return html`<${DetalheEquipamento} id=${b} />`;
     case 'e': return html`<${PorCodigo} codigo=${decodeURIComponent(b || '')} />`;
     case 'kits': return html`<${ListaKits} />`;
     case 'kit': return html`<${DetalheKit} id=${b} />`;
     case 'k': return html`<${KitPorCodigo} codigo=${decodeURIComponent(b || '')} />`;
-    case 'saida': return b === 'nova' ? html`<${NovaSaida} query=${rota.query} />` : html`<${DetalheSaida} id=${b} />`;
-    case 'saidas': return html`<${ListaSaidas} query=${rota.query} />`;
-    case 'reservas': return html`<${Reservas} query=${rota.query} />`;
     case 'manutencao': return html`<${Manutencao} />`;
-    case 'equipe': return isAdmin() ? html`<${Equipe} />` : html`<p>Acesso restrito.</p>`;
-    default: return html`<p class="muted">Página não encontrada. <a href="#/painel">Voltar ao painel</a></p>`;
+    default: return html`<p class="muted">Página não encontrada. <a href="#/quadro">Voltar ao quadro</a></p>`;
   }
 }
 
@@ -175,7 +179,7 @@ function App() {
     const { data: sub } = sb.auth.onAuthStateChange((ev, session) => {
       if (ev === 'PASSWORD_RECOVERY') setRecuperando(true);
       if (ev === 'SIGNED_IN' && session?.user?.id !== store.get().session?.user?.id) carregarPerfil(session);
-      if (ev === 'SIGNED_OUT') { store.set({ session: null, perfil: null, equipamentos: [], retiradas: [] }); }
+      if (ev === 'SIGNED_OUT') { store.set({ session: null, perfil: null, equipamentos: [], jobs: [] }); }
     });
     const foco = () => store.get().perfil?.ativo && document.visibilityState === 'visible' && carregarTudo();
     document.addEventListener('visibilitychange', foco);
