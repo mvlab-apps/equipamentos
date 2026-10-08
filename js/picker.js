@@ -127,7 +127,7 @@ export function SeletorItens({ itens, onChange, modo = 'mover', alertas = {} }) 
         ${aba === 'itens' ? resultados.map((e) => {
           const ok = elegivel(e); const ja = selIds.has(e.id);
           return html`<div key=${e.id} class=${'li click' + (!ok || ja ? ' disabled-row' : '')} onClick=${() => !ja && adicionar(e)}>
-            <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''} · ${e.portador_nome ? 'com ' + e.portador_nome : 'na base'}</div></div>
+            <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''} · ${e.portador_nome ? 'com ' + e.portador_nome : 'na base'}${e.dono_id ? html` · <span class="tag-colab">◆ próprio</span>` : ''}</div></div>
             ${ja ? html`<span class="badge b-gold plain">Na lista</span>` : html`<${Badge} e=${e} />`}
           </div>`;
         }) : kitsResumo.map((k) => html`<div key=${k.id} class=${'li click' + (k.disp === 0 ? ' disabled-row' : '')} onClick=${() => adicionarKit(k)}>

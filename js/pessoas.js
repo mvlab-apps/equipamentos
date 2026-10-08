@@ -30,7 +30,7 @@ function ListaPessoas() {
       <button class="btn primary" onClick=${() => setForm({})}><${Icone} n="mais" s=${16} />Nova pessoa</button></div>
     <div class="card flush tbl-wrap"><table class="tbl"><thead><tr><th>Pessoa</th><th class="hide-m">Login vinculado</th><th class="right">Itens agora</th><th class="right hide-m">Ordem</th><th></th></tr></thead>
       <tbody>${lista.map((p) => html`<tr key=${p.id} class="click" onClick=${() => setForm(p)} style=${p.ativo ? '' : 'opacity:.5'}>
-        <td><div style="font-weight:550">${p.nome}${!p.ativo ? ' (inativa)' : ''}</div><div class="small muted">${p.funcao || ''}</div></td>
+        <td><div style="font-weight:550">${p.nome}${!p.ativo ? ' (inativa)' : ''}${p.externo ? html` <span class="tag-colab">Freela</span>` : ''}</div><div class="small muted">${p.funcao || ''}</div></td>
         <td class="hide-m small">${p.perfil_id ? nomePerfil(st.perfis.find((x) => x.id === p.perfil_id)) : html`<span class="faint">—</span>`}</td>
         <td class="right"><a href=${'#/equipamentos?pessoa=' + p.id} onClick=${(e) => e.stopPropagation()}>${qtd(p.id)}</a></td>
         <td class="right hide-m muted">${p.ordem}</td><td class="right"><${Icone} n="editar" s=${15} /></td></tr>`)}</tbody></table></div>
@@ -40,11 +40,11 @@ function ListaPessoas() {
 
 function FormPessoa({ inicial, onClose }) {
   const st = useStore();
-  const [f, setF] = useState({ nome: inicial.nome || '', funcao: inicial.funcao || '', perfil_id: inicial.perfil_id || '', ordem: inicial.ordem ?? 100, ativo: inicial.ativo ?? true });
+  const [f, setF] = useState({ nome: inicial.nome || '', funcao: inicial.funcao || '', perfil_id: inicial.perfil_id || '', ordem: inicial.ordem ?? 100, ativo: inicial.ativo ?? true, externo: !!inicial.externo });
   const usados = new Set(st.pessoas.filter((p) => p.perfil_id && p.id !== inicial.id).map((p) => p.perfil_id));
   const salvar = async () => {
     if (!f.nome.trim()) return toast('Informe o nome.', 'erro');
-    const reg = { nome: f.nome.trim(), funcao: f.funcao.trim() || null, perfil_id: f.perfil_id || null, ordem: Number(f.ordem) || 100, ativo: f.ativo };
+    const reg = { nome: f.nome.trim(), funcao: f.funcao.trim() || null, perfil_id: f.perfil_id || null, ordem: Number(f.ordem) || 100, ativo: f.ativo, externo: f.externo };
     if (await acao(() => (inicial.id ? q(sb.from('pessoas').update(reg).eq('id', inicial.id)) : q(sb.from('pessoas').insert(reg))), 'Pessoa salva.')) { await carregarTudo(); onClose(); }
   };
   const excluir = async () => {
@@ -65,6 +65,8 @@ function FormPessoa({ inicial, onClose }) {
         <${Campo} rotulo="Ordem no quadro"><input class="input" type="number" value=${f.ordem} disabled=${!podeEditar} onInput=${(e) => setF({ ...f, ordem: e.target.value })} /><//>
       </div>
       <label class="check"><input type="checkbox" checked=${f.ativo} disabled=${!podeEditar} onChange=${(e) => setF({ ...f, ativo: e.target.checked })} />Ativa (aparece no quadro)</label>
+      <label class="check"><input type="checkbox" checked=${f.externo} disabled=${!podeEditar} onChange=${(e) => setF({ ...f, externo: e.target.checked })} />Freelancer / externo</label>
+      <div class="small muted" style="margin-top:-6px">Equipamento próprio de alguém da equipe recebe código <b>COL-</b>; de freelancer, <b>EXT-</b>. Ao mudar esta opção, os códigos dos itens dessa pessoa são renumerados.</div>
     </div><//>`;
 }
 

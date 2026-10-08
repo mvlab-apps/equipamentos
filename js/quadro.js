@@ -2,7 +2,7 @@
 import {
   html, useState, useEffect, useMemo, sb, store, useStore, ir, q, acao, toast, msgErro, isAdmin,
   GRUPOS, fmtData, fmtMoeda, fmtRelativo, paraLocalInput, deLocalInput, normalizar,
-  Icone, Badge, Campo, Modal, Vazio, Busca, nomePessoa, pessoasAtivas, minhaPessoa, carregarTudo, kitPorId,
+  Icone, Badge, Campo, Modal, Vazio, Busca, nomePessoa, pessoasAtivas, minhaPessoa, carregarTudo, kitPorId, primeiroNome,
 } from './core.js';
 import { buscarEquip, SeletorItens } from './picker.js';
 import { resumoJob, jobAtivo } from './cobertura.js';
@@ -16,12 +16,14 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
   const st = useStore();
   const lista = itens.map((i) => ({ ...i, e: st.equipamentos.find((x) => x.id === i.equipamento_id) })).filter((x) => x.e);
   const temEmprestado = lista.some((x) => x.e.emprestado);
+  const colabs = lista.filter((x) => x.e.dono_id);
   const [para, setPara] = useState(paraInicial === undefined ? '' : paraInicial === null ? BASE : paraInicial);
   const destino = para === BASE ? null : para || undefined;
   const tipoPadrao = () => {
     if (tipoInicial) return tipoInicial;
     if (temEmprestado && lista.every((x) => x.e.emprestado && x.e.titular_id === destino)) return 'devolver';
     if (destino && lista.every((x) => x.e.titular_id && x.e.titular_id !== destino)) return 'emprestar';
+    if (colabs.length) return para === BASE && temEmprestado ? 'devolver' : 'emprestar';
     return 'transferir';
   };
   const [tipo, setTipo] = useState(tipoPadrao);
@@ -41,10 +43,11 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
     let alvo = destino;
     if (para === '__nova') {
       if (!nova.trim()) return toast('Digite o nome da pessoa.', 'erro');
-      try { const p = await q(sb.from('pessoas').insert({ nome: nova.trim(), funcao: 'Externo' }).select().single()); alvo = p.id; }
+      try { const p = await q(sb.from('pessoas').insert({ nome: nova.trim(), funcao: 'Externo', externo: true }).select().single()); alvo = p.id; }
       catch (e) { return toast(msgErro(e), 'erro'); }
     }
     if (tipo !== 'devolver' && para === '') return toast('Escolha para onde vão os itens.', 'erro');
+    if (tipo === 'transferir' && colabs.length) return toast(`Equipamento de colaborador não pode ser transferido nem guardado na base: ${colabs.map((x) => x.e.codigo).join(', ')}. Use Emprestar, ou tire esses itens da seleção.`, 'erro');
     if (tipo === 'emprestar' && !alvo) return toast('Empréstimo precisa de uma pessoa (não da base).', 'erro');
     setEnviando(true);
     const ok = await acao(() => q(sb.rpc('mover_itens', {
@@ -71,8 +74,9 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
         <//>
         <${Campo} rotulo="Projeto / job (opcional)"><input class="input" value=${projeto} onInput=${(e) => setProjeto(e.target.value)} placeholder="Ex.: Itaú Views 17/10" /><//>
       </div>
+      ${colabs.length > 0 && html`<div class="alert colab small"><span>◆</span><div>${colabs.length === lista.length ? 'Todos os itens são' : `${colabs.length} item(ns) são`} equipamento próprio de colaborador (${[...new Set(colabs.map((x) => primeiroNome(x.e.dono_nome)))].join(', ')}). Eles só podem ser <b>emprestados</b> ou <b>devolvidos ao dono</b> — nunca transferidos ou guardados na base.</div></div>`}
       <div class="stack" style="gap:8px">
-        <label class="check"><input type="radio" name="tipo" checked=${tipo === 'transferir'} onChange=${() => setTipo('transferir')} />
+        <label class="check" style=${colabs.length ? 'opacity:.5' : ''}><input type="radio" name="tipo" disabled=${colabs.length > 0} checked=${tipo === 'transferir'} onChange=${() => setTipo('transferir')} />
           <span><b>${para === BASE ? 'Guardar na base' : 'Transferir'}</b> <span class="muted">— ${para === BASE ? 'deixa de ter titular' : `passa a ser de ${nomeDestino} (titular)`}</span></span></label>
         <label class="check" style=${para === BASE ? 'opacity:.5' : ''}><input type="radio" name="tipo" disabled=${para === BASE} checked=${tipo === 'emprestar'} onChange=${() => setTipo('emprestar')} />
           <span><b>Emprestar</b> <span class="muted">— fica com ${nomeDestino} até a data abaixo e depois volta para o titular</span></span></label>
@@ -82,7 +86,7 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
       ${tipo === 'emprestar' && html`<div class="grid-form"><${Campo} rotulo="Volta até"><input class="input" type="datetime-local" value=${ate} onInput=${(e) => setAte(e.target.value)} /><//>
         <${Campo} rotulo="Observação"><input class="input" value=${obs} onInput=${(e) => setObs(e.target.value)} /><//></div>`}
       <div class="card flush"><div class="list">${linhas.map((l) => html`<div class="li" key=${l.e.id}>
-        <div class="grow"><div class="t ellipsis">${l.e.nome}</div><div class="s"><span class="mono">${l.e.codigo}</span>${l.e.kit_nome ? ' · ' + l.e.kit_nome : ''}${l.e.titular_id ? ' · titular: ' + l.e.titular_nome : ''}</div></div>
+        <div class="grow"><div class="t ellipsis">${l.e.nome}</div><div class="s"><span class="mono">${l.e.codigo}</span>${l.e.kit_nome ? ' · ' + l.e.kit_nome : ''}${l.e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${primeiroNome(l.e.dono_nome)}</span>` : l.e.titular_id ? ' · titular: ' + l.e.titular_nome : ''}</div></div>
         <span class="small muted nowrap">${nomePessoa(l.de)} → <b style="color:var(--text)">${tipo === 'devolver' ? nomePessoa(l.para) : nomeDestino}</b></span></div>`)}</div></div>
     </div><//>`;
 }
@@ -112,6 +116,7 @@ export function Quadro({ query }) {
   const st = useStore();
   const [termo, setTermo] = useState(query.q || '');
   const [grupo, setGrupo] = useState(query.grupo || '');
+  const [prop, setProp] = useState(query.prop || '');
   const [vista, setVista] = useState(query.vista || 'quadro');
   const [selecionando, setSelecionando] = useState(false);
   const [sel, setSel] = useState(new Set());
@@ -126,7 +131,8 @@ export function Quadro({ query }) {
       .then((l) => { const m = {}; l.forEach((c) => { const k = chave(c.pessoa_id); if (!m[k]) m[k] = c; }); setUltConf(m); }).catch(() => {});
   }, [st.atualizadoEm]);
 
-  const visiveis = useMemo(() => buscarEquip(st.equipamentos.filter((e) => e.status !== 'baixado' && (!grupo || e.grupo === grupo)), termo), [st.equipamentos, termo, grupo]);
+  const visiveis = useMemo(() => buscarEquip(st.equipamentos.filter((e) => e.status !== 'baixado' && (!grupo || e.grupo === grupo)
+    && (!prop || (prop === 'colab' ? e.dono_id : !e.dono_id))), termo), [st.equipamentos, termo, grupo, prop]);
   const colunas = [{ id: null, nome: 'Na base', funcao: 'Guardado' }, ...pessoasAtivas()];
   const porColuna = {}; colunas.forEach((c) => (porColuna[chave(c.id)] = []));
   visiveis.forEach((e) => { const k = chave(e.portador_id); (porColuna[k] = porColuna[k] || []).push(e); });
@@ -150,11 +156,11 @@ export function Quadro({ query }) {
 
   const ItemLinha = ({ e }) => {
     const marcado = sel.has(e.id);
-    return html`<div key=${e.id} class=${'qitem' + (marcado ? ' sel' : '')} draggable=${!selecionando} onDragStart=${(ev) => arrastar(ev, [{ equipamento_id: e.id, kit_id: e.kit_id }])}
+    return html`<div key=${e.id} class=${'qitem' + (marcado ? ' sel' : '') + (e.dono_id ? ' colab' : '')} title=${e.dono_id ? 'Equipamento próprio de ' + e.dono_nome + ' (não pertence à produtora)' : ''} draggable=${!selecionando} onDragStart=${(ev) => arrastar(ev, [{ equipamento_id: e.id, kit_id: e.kit_id }])}
       onClick=${() => (selecionando ? toggle([e.id]) : ir('/equipamento/' + e.id))}>
       ${selecionando && html`<input type="checkbox" class="check" checked=${marcado} onClick=${(ev) => ev.stopPropagation()} onChange=${() => toggle([e.id])} />`}
       <div class="grow" style="min-width:0"><div class="qnome">${e.nome}</div>
-        <div class="qmeta"><span class="mono">${e.codigo}</span> · ${e.categoria}
+        <div class="qmeta">${e.dono_id ? html`<span class="tag-colab">próprio${e.portador_id !== e.dono_id ? ' de ' + primeiroNome(e.dono_nome) : ''}</span> · ` : ''}<span class="mono">${e.codigo}</span> · ${e.categoria}
           ${e.emprestado && e.portador_id ? html` · <span style=${'color:' + (e.atrasado ? 'var(--bad)' : 'var(--res)')}>de ${e.titular_nome ? e.titular_nome.split(' ')[0] : 'base'}${e.emprestimo_ate ? ', volta ' + fmtData(e.emprestimo_ate) : ''}</span>` : ''}
           ${e.status !== 'ok' ? html` · <span style="color:var(--warn)">${e.status === 'manutencao' ? 'manutenção' : e.status}</span>` : ''}</div></div>
     </div>`;
@@ -166,14 +172,15 @@ export function Quadro({ query }) {
     const kits = {}; const soltos = [];
     itens.forEach((e) => (e.kit_id ? (kits[e.kit_id] = kits[e.kit_id] || []).push(e) : soltos.push(e)));
     const uc = ultConf[k];
-    const valor = itens.reduce((s, e) => s + (Number(e.valor_compra) || 0), 0);
+    const valor = itens.filter((e) => !e.dono_id).reduce((s, e) => s + (Number(e.valor_compra) || 0), 0);
+    const nColab = itens.filter((e) => e.dono_id).length;
     return html`<section key=${k} class=${'qcol' + (sobre === k ? ' alvo' : '') + (eu && eu.id === c.id ? ' eu' : '')}
       onDragOver=${(ev) => { ev.preventDefault(); if (sobre !== k) setSobre(k); }} onDragLeave=${(ev) => { if (!ev.currentTarget.contains(ev.relatedTarget)) setSobre(null); }}
       onDrop=${(ev) => onDrop(ev, c.id)}>
       <header class="qhead">
         <div class="row between nw"><div style="min-width:0"><h3 class="ellipsis">${c.nome}${eu && eu.id === c.id ? html` <span class="badge b-gold plain">você</span>` : ''}</h3>
           <div class="small muted ellipsis">${c.funcao || ''}</div></div>
-          <span class="badge b-neutro plain">${itens.length}</span></div>
+          <span class="row nw" style="gap:4px">${nColab > 0 && html`<span class="badge b-colab plain" title="Equipamentos próprios (não são da produtora)">◆ ${nColab}</span>`}<span class="badge b-neutro plain" title="Itens da produtora">${itens.length - nColab}</span></span></div>
         <div class="row between nw small" style="margin-top:6px">
           <span class="faint">${uc ? `Conferido ${fmtRelativo(uc.criado_em)}${uc.faltando?.length ? ` · ${uc.faltando.length} faltando` : ''}` : 'Nunca conferido'}${isAdmin() && valor ? ' · ' + fmtMoeda(valor) : ''}</span>
           ${itens.length > 0 && html`<button class="btn ghost sm" onClick=${() => setConf({ pessoa: c.id, itens })}>Conferir</button>`}
@@ -183,7 +190,7 @@ export function Quadro({ query }) {
       <div class="qbody">
         ${Object.entries(kits).map(([kid, arr]) => {
           const kit = kitPorId(kid); const total = st.equipamentos.filter((e) => e.kit_id === kid && e.status !== 'baixado').length; const fk = k + kid;
-          return html`<div class="qkit" key=${kid}>
+          return html`<div class=${'qkit' + (arr.every((e) => e.dono_id) ? ' colab' : '')} key=${kid}>
             <div class="qkit-h" draggable=${!selecionando} onDragStart=${(ev) => arrastar(ev, arr.map((e) => ({ equipamento_id: e.id, kit_id: kid })))}
               onClick=${() => (selecionando ? toggle(arr.map((e) => e.id)) : fecharKit(fk))}>
               <span class="caret">${fechados.has(fk) ? '▸' : '▾'}</span><b class="ellipsis grow">${kit?.nome || 'Kit'}</b>
@@ -218,6 +225,11 @@ export function Quadro({ query }) {
       <div class="row"><${Busca} valor=${termo} onInput=${setTermo} placeholder="Filtrar por nome, código, marca, tag…" />
         ${vista === 'quadro' && html`<button class=${'btn' + (selecionando ? ' primary' : '')} onClick=${() => { setSelecionando(!selecionando); setSel(new Set()); }}>
           <${Icone} n="check" s=${16} />${selecionando ? `Selecionando (${sel.size})` : 'Selecionar vários'}</button>`}</div>
+      <div class="chips">
+        <button class=${'chip' + (!prop ? ' on' : '')} onClick=${() => setProp('')}>Tudo</button>
+        <button class=${'chip' + (prop === 'mv' ? ' on' : '')} onClick=${() => setProp('mv')}>Da produtora <span class="n">${st.equipamentos.filter((e) => !e.dono_id && e.status !== 'baixado').length}</span></button>
+        <button class=${'chip' + (prop === 'colab' ? ' on' : '')} style="border-color:var(--colab-line);color:var(--colab)" onClick=${() => setProp('colab')}>◆ De colaboradores <span class="n">${st.equipamentos.filter((e) => e.dono_id && e.status !== 'baixado').length}</span></button>
+      </div>
       <div class="chips"><button class=${'chip' + (!grupo ? ' on' : '')} onClick=${() => setGrupo('')}>Todos</button>
         ${GRUPOS.filter((g) => st.equipamentos.some((e) => e.grupo === g)).map((g) => html`<button class=${'chip' + (grupo === g ? ' on' : '')} onClick=${() => setGrupo(grupo === g ? '' : g)}>${g} <span class="n">${st.equipamentos.filter((e) => e.grupo === g && e.status !== 'baixado').length}</span></button>`)}</div>
     </div>
@@ -238,14 +250,14 @@ export function Quadro({ query }) {
 function TabelaDinamica({ itens, colunas, onCelula }) {
   const [abertos, setAbertos] = useState(new Set());
   const [medida, setMedida] = useState('qtd');
-  const val = (arr) => (medida === 'qtd' ? arr.length : arr.reduce((s, e) => s + (Number(e.valor_compra) || 0), 0));
+  const val = (arr) => (medida === 'qtd' ? arr.length : arr.filter((e) => !e.dono_id).reduce((s, e) => s + (Number(e.valor_compra) || 0), 0));
   const fmt = (v) => (medida === 'qtd' ? (v || '') : v ? fmtMoeda(v).replace(',00', '') : '');
   const grupos = GRUPOS.filter((g) => itens.some((e) => e.grupo === g));
   const cel = (arr, c) => arr.filter((e) => chave(e.portador_id) === chave(c.id));
   const tg = (g) => { const s = new Set(abertos); s.has(g) ? s.delete(g) : s.add(g); setAbertos(s); };
   return html`<div class="stack">
     ${isAdmin() && html`<div class="chips"><button class=${'chip' + (medida === 'qtd' ? ' on' : '')} onClick=${() => setMedida('qtd')}>Quantidade</button>
-      <button class=${'chip' + (medida === 'valor' ? ' on' : '')} onClick=${() => setMedida('valor')}>Valor de compra</button></div>`}
+      <button class=${'chip' + (medida === 'valor' ? ' on' : '')} onClick=${() => setMedida('valor')}>Valor de compra (só produtora)</button></div>`}
     <div class="card flush tbl-wrap"><table class="tbl pivot"><thead><tr><th>Grupo / categoria</th>${colunas.map((c) => html`<th class="right">${c.id ? c.nome.split(' ')[0] : 'Base'}</th>`)}<th class="right">Total</th></tr></thead>
       <tbody>${grupos.map((g) => {
         const gi = itens.filter((e) => e.grupo === g);

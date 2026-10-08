@@ -133,7 +133,7 @@ export function DetalheJob({ id }) {
           : Object.entries(porPessoa).sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : nomePessoa(a).localeCompare(nomePessoa(b)))).map(([pid, arr]) => html`<div key=${pid}>
               <div class="li" style="background:var(--surface-2)"><b class="grow">${pid ? nomePessoa(pid) : 'Na base (alguém precisa buscar)'}</b><span class="small muted">${arr.length}</span></div>
               ${arr.map((i) => html`<a class="li" key=${i.equipamento_id} href=${'#/equipamento/' + i.equipamento_id}>
-                <div class="grow"><div class="t ellipsis">${i.e.nome}</div><div class="s"><span class="mono">${i.e.codigo}</span> · ${i.e.categoria}${i.kit_id ? ' · ' + (kitPorId(i.kit_id)?.nome || '') : ''}
+                <div class="grow"><div class="t ellipsis">${i.e.nome}</div><div class="s"><span class="mono">${i.e.codigo}</span> · ${i.e.categoria}${i.kit_id ? ' · ' + (kitPorId(i.kit_id)?.nome || '') : ''}${i.e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${i.e.dono_nome}</span>` : ''}
                   ${confIds.has(i.equipamento_id) ? html` · <span style="color:var(--bad)">também em ${confIds.get(i.equipamento_id).titulo}</span>` : ''}</div></div>
                 ${i.e.status !== 'ok' ? html`<${Badge} e=${i.e} />` : ''}</a>`)}</div>`)}
           ${itens.length > 0 && html`<div class="row" style="padding:12px 16px;border-top:1px solid var(--border)">
@@ -173,6 +173,8 @@ function EditarItens({ job, onClose }) {
   const [itens, setItens] = useState(() => (job.job_itens || []).map((i) => ({ equipamento_id: i.equipamento_id, kit_id: i.kit_id })));
   const outros = conflitos({ ...job, job_itens: itens });
   const alertas = {}; outros.forEach((c) => (alertas[c.equipamento_id] = `também em ${c.job.titulo} (${faixa(c.job)})`));
+  itens.forEach((i) => { const e = store.get().equipamentos.find((x) => x.id === i.equipamento_id);
+    if (e?.dono_id && e.dono_id !== job.responsavel_id) alertas[e.id] = (alertas[e.id] ? alertas[e.id] + ' · ' : '') + `próprio de ${e.dono_nome} — combine com ele`; });
   const salvar = async () => { if (await acao(() => q(sb.rpc('salvar_itens_job', { p_job_id: job.id, p_itens: itens })), 'Equipamentos do job salvos.')) { await carregarTudo(); onClose(); } };
   return html`<${Modal} largo titulo=${'Equipamentos · ' + job.titulo} onClose=${onClose}
     rodape=${html`<button class="btn" onClick=${onClose}>Cancelar</button><button class="btn primary" onClick=${salvar}>Salvar (${itens.length})</button>`}>

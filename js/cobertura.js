@@ -79,6 +79,8 @@ export function sugerir(job) {
   const atuais = new Set((job.job_itens || []).map((i) => i.equipamento_id));
   const novos = [];
   const usar = (e, kit_id = null) => { atuais.add(e.id); novos.push({ equipamento_id: e.id, kit_id }); };
+  // equipamento próprio de colaborador só entra se o dono for o responsável pelo job
+  const podeUsar = (e) => !e.dono_id || e.dono_id === job.responsavel_id;
   const prioridade = (portador) => (job.responsavel_id && portador === job.responsavel_id ? 0 : !portador ? 1 : 2);
   const naoAtendidos = [];
 
@@ -89,11 +91,11 @@ export function sugerir(job) {
     if (r.tipo === 'kit') {
       const candidatos = st.kits.filter((k) => mesmo(k.tipo || '', r.valor)).map((k) => {
         const membros = st.equipamentos.filter((e) => e.kit_id === k.id);
-        return { k, membros, livre: membros.length > 0 && membros.every((e) => !ocupados.has(e.id) && !atuais.has(e.id)) && membros.some(OPERACIONAL) };
+        return { k, membros, livre: membros.length > 0 && membros.every((e) => podeUsar(e) && !ocupados.has(e.id) && !atuais.has(e.id)) && membros.some(OPERACIONAL) };
       }).filter((x) => x.livre).sort((a, b) => prioridade(a.membros[0]?.portador_id) - prioridade(b.membros[0]?.portador_id));
       for (const x of candidatos) { if (!faltam) break; x.membros.filter(OPERACIONAL).forEach((e) => usar(e, x.k.id)); faltam--; }
     } else if (r.tipo === 'categoria') {
-      const candidatos = st.equipamentos.filter((e) => OPERACIONAL(e) && mesmo(e.categoria, r.valor) && !ocupados.has(e.id) && !atuais.has(e.id))
+      const candidatos = st.equipamentos.filter((e) => OPERACIONAL(e) && podeUsar(e) && mesmo(e.categoria, r.valor) && !ocupados.has(e.id) && !atuais.has(e.id))
         .sort((a, b) => (a.kit_id ? 1 : 0) - (b.kit_id ? 1 : 0) || prioridade(a.portador_id) - prioridade(b.portador_id));
       for (const e of candidatos) { if (!faltam) break; usar(e); faltam--; }
     } else {

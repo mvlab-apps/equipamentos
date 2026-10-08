@@ -159,8 +159,11 @@ export function msgErro(e) {
 }
 
 // status "efetivo" para exibição (inclui reserva vigente hoje e atraso)
+export const primeiroNome = (n) => (n || '?').split(' ')[0];
+export const deColaborador = (e) => !!(e && e.dono_id);
 export function statusExibicao(e) {
   if (e.status && e.status !== 'ok') return { cls: e.status, rot: STATUS[e.status] || e.status };
+  if (e.dono_id && !e.emprestado) return { cls: 'colab', rot: (pessoaPorId(e.dono_id)?.externo ? 'Freela · ' : 'Próprio · ') + primeiroNome(e.dono_nome) };
   if (e.atrasado) return { cls: 'atrasado', rot: 'Atrasado' };
   if (e.emprestado && e.portador_id) return { cls: 'emprestado', rot: 'Emprestado' };
   if (e.emprestado && !e.portador_id) return { cls: 'base', rot: 'Na base (de ' + (e.titular_nome || '?') + ')' };

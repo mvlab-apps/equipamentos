@@ -294,3 +294,13 @@ table.tbl { width: 100%; border-collapse: collapse; }
 @media (max-width: 600px) { .job { grid-template-columns: 1fr auto; } .job .hora { grid-column: 1 / -1; } }
 .qkit-h b { min-width: 0; } .qitem .grow { min-width: 0; } .qcol .qbody > * { min-width: 0; }
 .main.largo { max-width: none; }
+
+/* ---------- equipamento de colaborador (não pertence à produtora) ---------- */
+:root { --colab: #3ec7c2; --colab-soft: rgba(62,199,194,.13); --colab-line: rgba(62,199,194,.55); }
+.b-colab { background: var(--colab-soft); color: var(--colab); }
+.qitem.colab { background: var(--colab-soft); border: 1px dashed var(--colab-line); }
+.qitem.colab .qnome::before { content: "◆ "; color: var(--colab); font-size: 10px; vertical-align: 1px; }
+.qkit.colab { border-style: dashed; border-color: var(--colab-line); background: rgba(62,199,194,.05); }
+.tag-colab { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--colab); }
+tr.colab td:first-child { box-shadow: inset 3px 0 0 var(--colab); }
+.alert.colab { background: var(--colab-soft); border-color: var(--colab-line); color: #b9f1ee; }
