@@ -304,3 +304,29 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .tag-colab { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--colab); }
 tr.colab td:first-child { box-shadow: inset 3px 0 0 var(--colab); }
 .alert.colab { background: var(--colab-soft); border-color: var(--colab-line); color: #b9f1ee; }
+
+/* ---------- unidades iguais (N×) ---------- */
+.qtd { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 20px; padding: 0 6px; border-radius: 10px; font-size: 11.5px; font-weight: 700; background: var(--gold-soft); color: var(--gold); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.qitem.grupo .caret { color: var(--faint); width: 10px; font-size: 11px; }
+.qsub { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--border); }
+.qsub .qitem { padding: 5px 8px; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
+.stepper button { background: transparent; border: 0; color: var(--text); width: 28px; height: 28px; cursor: pointer; font-size: 15px; }
+.stepper button:disabled { opacity: .35; cursor: default; }
+.stepper button:not(:disabled):hover { background: var(--surface-2); }
+.stepper span { min-width: 34px; text-align: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+tr.sub td:nth-child(2) { padding-left: 28px; }
+tr.sub { background: var(--surface-2); }
+
+/* ---------- cores por pessoa ---------- */
+.ponto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); margin-right: 6px; vertical-align: 0; flex-shrink: 0; }
+.qitem.tem-cor { box-shadow: inset 4px 0 0 var(--cor); padding-left: 13px; }
+.qcol.tem-cor { border-top: 3px solid var(--cor); }
+.qitem .de-outro { color: var(--cor-dono, var(--res)); font-weight: 600; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatches button { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.swatches button.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+.legenda-cores { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); align-items: center; }
+.badge.b-fixo { background: rgba(231,181,83,.14); color: var(--gold); }
+.badge.b-conjunto { background: var(--surface-3); color: var(--muted); }
+.qkit-fora { font-size: 11.5px; color: var(--muted); padding: 0 6px 4px 22px; }
