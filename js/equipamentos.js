@@ -3,6 +3,7 @@ import {
   STATUS, CONDICAO, TIPO_ANEXO, CATEGORIAS_SUGERIDAS, fmtData, fmtMoeda, fmtRelativo, hojeISO, numeroBR, dataBR, normalizar,
   Icone, Badge, Campo, Modal, Vazio, Busca, Foto, urlArquivo, enviarArquivo, qrSvg, urlItem, imprimir, lerCSV, gerarCSV, baixar,
   EMPRESA, recarregarEmBreve, carregarTudo, nomePessoa, pessoasAtivas, minhaPessoa, GRUPOS, primeiroNome,
+  chaveUnidade, agrupar, listaCodigos, distribuicao, unidadesDe, statusExibicao, EstaCom, PertenceA, Ponto, corPessoa,
 } from './core.js';
 import { buscarEquip } from './picker.js';
 import { MoverModal } from './quadro.js';
@@ -21,6 +22,7 @@ export function ListaEquipamentos({ query }) {
   const [sel, setSel] = useState(new Set());
   const [form, setForm] = useState(null);
   const [importar, setImportar] = useState(false);
+  const [abertos, setAbertos] = useState(new Set());
   const alerta = query.alerta;
   useEffect(() => { if (query.status) setStatus(query.status); }, [query.status]);
 
@@ -44,6 +46,8 @@ export function ListaEquipamentos({ query }) {
     return buscarEquip(l, termo);
   }, [st.equipamentos, termo, status, cat, alerta, pessoa, prop]);
 
+  const grupos = useMemo(() => agrupar(lista), [lista]);
+  const abrir = (k) => { const s = new Set(abertos); s.has(k) ? s.delete(k) : s.add(k); setAbertos(s); };
   const conta = (s) => st.equipamentos.filter((e) => (s === 'ativos' ? e.status !== 'baixado' : s === 'atrasado' ? e.atrasado : s === 'emprestado' ? e.emprestado && e.portador_id : s === 'base' ? !e.portador_id && e.status !== 'baixado' : s === 'job' ? e.job_id : e.status === s)).length;
   const chips = [['ativos', 'Todos'], ['base', 'Na base'], ['emprestado', 'Emprestados'], ['atrasado', 'Atrasados'], ['job', 'Em job futuro'], ['manutencao', 'Manutenção'], ['extraviado', 'Extraviados'], ['baixado', 'Baixados']];
   const toggle = (id) => { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); setSel(s); };
@@ -59,6 +63,32 @@ export function ListaEquipamentos({ query }) {
     const alvo = st.equipamentos.filter((e) => sel.has(e.id));
     if (!alvo.length) return toast('Selecione os itens na lista (caixas à esquerda).', 'erro');
     imprimirEtiquetas(alvo);
+  };
+
+  const linha = (e, sub) => html`<tr key=${e.id} class=${'click' + (e.dono_id ? ' colab' : '') + (sub ? ' sub' : '')} onClick=${() => ir('/equipamento/' + e.id)}>
+          <td onClick=${(ev) => ev.stopPropagation()}><input type="checkbox" class="check" checked=${sel.has(e.id)} onChange=${() => toggle(e.id)} aria-label=${'Selecionar ' + e.codigo} /></td>
+          <td style="min-width:200px"><div style="font-weight:550">${e.nome}</div><div class="small muted"><span class="mono">${e.codigo}</span>${e.marca ? ' · ' + e.marca : ''}${e.kit_nome ? ' · ' + e.kit_nome : ''}${e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${primeiroNome(e.dono_nome)}</span>` : ''}</div></td>
+          <td class="hide-m">${e.categoria}</td>
+          <td class="hide-m"><${Badge} e=${e} /></td>
+          <td class="small"><${EstaCom} e=${e} />${e.job_id ? html`<div style="color:var(--res)">${fmtData(e.job_inicio)}: ${e.job_titulo}</div>` : ''}</td>
+          <td class="small"><${PertenceA} e=${e} /></td>
+          ${isAdmin() && html`<td class="hide-m right nowrap" style=${e.dono_id ? 'color:var(--faint)' : ''} title=${e.dono_id ? 'Não entra no patrimônio da produtora' : ''}>${e.dono_id && e.valor_compra ? '(' + fmtMoeda(e.valor_compra) + ')' : fmtMoeda(e.valor_compra)}</td>`}
+        </tr>`;
+
+  const linhaGrupo = (g) => {
+    const e = g[0]; const k = chaveUnidade(e); const ids = g.map((x) => x.id); const todos = ids.every((id) => sel.has(id));
+    const rots = new Set(g.map((x) => statusExibicao(x).rot));
+    const valores = new Set(g.map((x) => Number(x.valor_compra) || 0)); const soma = g.reduce((t, x) => t + (Number(x.valor_compra) || 0), 0);
+    return html`<tr key=${'g' + k} class=${'click' + (e.dono_id ? ' colab' : '')} onClick=${() => abrir(k)} title="Ver as unidades">
+      <td onClick=${(ev) => ev.stopPropagation()}><input type="checkbox" class="check" checked=${todos} onChange=${() => { const s = new Set(sel); ids.forEach((id) => (todos ? s.delete(id) : s.add(id))); setSel(s); }} aria-label=${'Selecionar ' + g.length + ' unidades'} /></td>
+      <td style="min-width:200px"><div style="font-weight:550" class="row nw"><span class="qtd">${g.length}×</span><span class="ellipsis">${e.nome}</span><span class="faint small">${abertos.has(k) ? '▾' : '▸'}</span></div>
+        <div class="small muted"><span class="mono">${listaCodigos(g)}</span>${e.marca ? ' · ' + e.marca : ''}${e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${primeiroNome(e.dono_nome)}</span>` : ''}</div></td>
+      <td class="hide-m">${e.categoria}</td>
+      <td class="hide-m">${rots.size === 1 ? html`<${Badge} e=${e} />` : html`<span class="small muted">${rots.size} situações</span>`}</td>
+      <td class="small">${distribuicao(g)}</td>
+      <td class="small">${new Set(g.map((x) => x.titular_id || '')).size === 1 ? html`<${PertenceA} e=${e} />` : html`<span><${Ponto} />${e.dono_id ? '◆ ' + e.dono_nome : 'MV LAB'}<div class="muted small">vários responsáveis</div></span>`}</td>
+      ${isAdmin() && html`<td class="hide-m right nowrap" style=${e.dono_id ? 'color:var(--faint)' : ''}>${soma ? (valores.size === 1 ? `${g.length} × ${fmtMoeda(e.valor_compra)}` : fmtMoeda(soma)) : '—'}</td>`}
+    </tr>`;
   };
 
   return html`<div>
@@ -85,18 +115,9 @@ export function ListaEquipamentos({ query }) {
     <div class="card flush tbl-wrap">
       <table class="tbl"><thead><tr>
         <th style="width:36px"><input type="checkbox" class="check" checked=${todosSel} onChange=${() => setSel(todosSel ? new Set() : new Set(lista.map((e) => e.id)))} aria-label="Selecionar todos" /></th>
-        <th>Equipamento</th><th class="hide-m">Categoria</th><th>Situação</th><th class="hide-m">Com quem</th>${isAdmin() && html`<th class="hide-m right">Valor</th>`}
+        <th>Equipamento</th><th class="hide-m">Categoria</th><th class="hide-m">Situação</th><th>Está com</th><th>Pertence a</th>${isAdmin() && html`<th class="hide-m right">Valor</th>`}
       </tr></thead><tbody>
-        ${lista.slice(0, 600).map((e) => html`<tr key=${e.id} class=${'click' + (e.dono_id ? ' colab' : '')} onClick=${() => ir('/equipamento/' + e.id)}>
-          <td onClick=${(ev) => ev.stopPropagation()}><input type="checkbox" class="check" checked=${sel.has(e.id)} onChange=${() => toggle(e.id)} aria-label=${'Selecionar ' + e.codigo} /></td>
-          <td style="min-width:200px"><div style="font-weight:550">${e.nome}</div><div class="small muted"><span class="mono">${e.codigo}</span>${e.marca ? ' · ' + e.marca : ''}${e.kit_nome ? ' · ' + e.kit_nome : ''}${e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${primeiroNome(e.dono_nome)}</span>` : ''}</div></td>
-          <td class="hide-m">${e.categoria}</td>
-          <td><${Badge} e=${e} /></td>
-          <td class="hide-m small">${e.portador_id ? html`<b style="font-weight:550">${e.portador_nome}</b>` : html`<span class="muted">Base${e.localizacao ? ' · ' + e.localizacao : ''}</span>`}
-            ${e.emprestado && e.titular_id ? html`<div class="muted">de ${e.titular_nome}${e.emprestimo_ate ? ', volta ' + fmtData(e.emprestimo_ate) : ''}</div>` : ''}
-            ${e.job_id ? html`<div style="color:var(--res)">${fmtData(e.job_inicio)}: ${e.job_titulo}</div>` : ''}</td>
-          ${isAdmin() && html`<td class="hide-m right nowrap" style=${e.dono_id ? 'color:var(--faint)' : ''} title=${e.dono_id ? 'Não entra no patrimônio da produtora' : ''}>${e.dono_id && e.valor_compra ? '(' + fmtMoeda(e.valor_compra) + ')' : fmtMoeda(e.valor_compra)}</td>`}
-        </tr>`)}
+        ${grupos.slice(0, 600).map((g) => (g.length === 1 ? linha(g[0], false) : html`${linhaGrupo(g)}${abertos.has(chaveUnidade(g[0])) ? g.map((e) => linha(e, true)) : ''}`))}
       </tbody></table>
       ${!lista.length && html`<${Vazio} titulo=${st.equipamentos.length ? 'Nenhum item com esses filtros' : 'Inventário vazio'}>${!st.equipamentos.length && isAdmin() ? 'Cadastre o primeiro item ou importe sua planilha.' : ''}<//>`}
     </div>
@@ -124,6 +145,10 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
   const [nf, setNf] = useState(null);
   const [foto, setFoto] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [qtd, setQtd] = useState(1);
+  const [series, setSeries] = useState('');
+  const irmaos = editando ? unidadesDe(inicial).filter((x) => x.id !== inicial.id) : [];
+  const [emTodas, setEmTodas] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const categorias = [...new Set([...CATEGORIAS_SUGERIDAS, ...st.equipamentos.map((e) => e.categoria)])].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const locais = [...new Set(st.equipamentos.map((e) => e.localizacao).filter(Boolean))];
@@ -143,20 +168,35 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
       reg.valor_compra = numeroBR(f.valor_compra); reg.valor_locacao = numeroBR(f.valor_locacao);
       reg.data_compra = f.data_compra || null; reg.garantia_ate = f.garantia_ate || null;
       if (foto) reg.foto_path = await enviarArquivo(foto, 'fotos');
-      const salvo = editando
-        ? await q(sb.from('equipamentos').update(reg).eq('id', inicial.id).select().single())
-        : await q(sb.from('equipamentos').insert(reg).select().single());
+      const n = editando ? 1 : Math.max(1, Math.min(50, Number(qtd) || 1));
+      let salvos;
+      if (editando) salvos = [await q(sb.from('equipamentos').update(reg).eq('id', inicial.id).select().single())];
+      else if (n === 1) salvos = [await q(sb.from('equipamentos').insert(reg).select().single())];
+      else {
+        // várias unidades iguais: mesmo cadastro, código automático e nº de série próprio para cada uma
+        const ns = series.split(/\r?\n/).map((x) => x.trim());
+        delete reg.codigo;
+        salvos = await q(sb.from('equipamentos').insert(Array.from({ length: n }, (_, i) => ({ ...reg, numero_serie: ns[i] || null }))).select());
+        salvos.sort((a, b) => a.codigo.localeCompare(b.codigo));
+      }
+      const salvo = salvos[0];
+      if (editando && emTodas && irmaos.length) {
+        // mesmas alterações nas outras unidades iguais (código, nº de série e situação continuam individuais)
+        const comum = { ...reg }; ['codigo', 'numero_serie', 'status', 'condicao', 'foto_path'].forEach((k) => delete comum[k]);
+        if (foto) comum.foto_path = reg.foto_path;
+        await q(sb.from('equipamentos').update(comum).in('id', irmaos.map((x) => x.id)));
+      }
       // kit
       const kitAntes = inicial.kit_id || '';
       if (f.kit_id !== kitAntes) {
         if (kitAntes) await q(sb.from('kit_itens').delete().eq('equipamento_id', salvo.id));
-        if (f.kit_id) await q(sb.from('kit_itens').insert({ kit_id: f.kit_id, equipamento_id: salvo.id }));
+        if (f.kit_id) await q(sb.from('kit_itens').insert(salvos.map((x) => ({ kit_id: f.kit_id, equipamento_id: x.id }))));
       }
       if (nf) {
         const path = await enviarArquivo(nf, 'nf/' + salvo.id);
-        await q(sb.from('anexos').insert({ equipamento_id: salvo.id, tipo: 'nota_fiscal', nome: nf.name, path, tamanho: nf.size, mime: nf.type }));
+        await q(sb.from('anexos').insert(salvos.map((x) => ({ equipamento_id: x.id, tipo: 'nota_fiscal', nome: nf.name, path, tamanho: nf.size, mime: nf.type }))));
       }
-      toast(editando ? 'Alterações salvas.' : `Cadastrado como ${salvo.codigo}.`, 'ok');
+      toast(editando ? 'Alterações salvas.' : salvos.length > 1 ? `${salvos.length} unidades cadastradas: ${listaCodigos(salvos, 4)}.` : `Cadastrado como ${salvo.codigo}.`, 'ok');
       await carregarTudo();
       onClose(); onSalvo ? onSalvo(salvo) : !editando && ir('/equipamento/' + salvo.id);
     } catch (e) { toast(msgErro(e), 'erro'); }
@@ -170,11 +210,14 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
       <datalist id="dl-loc">${locais.map((c) => html`<option value=${c} />`)}</datalist>
       <div><h3 style="margin-bottom:10px">Identificação</h3><div class="grid-form">
         <${Campo} rotulo="Nome" obrig cls="span-2"><input class="input" value=${f.nome} onInput=${set('nome')} placeholder="Ex.: Sony FX3" required autofocus /><//>
-        <${Campo} rotulo="Código / patrimônio"><input class="input mono" value=${f.codigo} onInput=${set('codigo')} placeholder=${editando ? '' : 'Automático (MV-, COL- ou EXT-)'} /><//>
+        <${Campo} rotulo="Código / patrimônio"><input class="input mono" value=${!editando && Number(qtd) > 1 ? '' : f.codigo} disabled=${!editando && Number(qtd) > 1} onInput=${set('codigo')} placeholder=${editando ? '' : 'Automático (MV-, COL- ou EXT-)'} /><//>
         <${Campo} rotulo="Categoria"><input class="input" list="dl-cat" value=${f.categoria} onInput=${set('categoria')} placeholder="Escolha ou digite" /><//>
         <${Campo} rotulo="Marca"><input class="input" value=${f.marca} onInput=${set('marca')} /><//>
         <${Campo} rotulo="Modelo"><input class="input" value=${f.modelo} onInput=${set('modelo')} /><//>
-        <${Campo} rotulo="Nº de série"><input class="input mono" value=${f.numero_serie} onInput=${set('numero_serie')} /><//>
+        ${!editando && html`<${Campo} rotulo="Quantidade de unidades"><input class="input" type="number" min="1" max="50" value=${qtd} onInput=${(e) => setQtd(e.target.value)} /><//>`}
+        ${editando || Number(qtd) <= 1
+          ? html`<${Campo} rotulo="Nº de série"><input class="input mono" value=${f.numero_serie} onInput=${set('numero_serie')} /><//>`
+          : html`<${Campo} rotulo=${`Nºs de série — um por linha, opcional (${Number(qtd)} unidades)`} cls="span-2"><textarea class="input mono" rows="3" value=${series} onInput=${(e) => setSeries(e.target.value)} placeholder=${'Unidade 1\nUnidade 2\n…'}></textarea><//>`}
         <${Campo} rotulo="Kit"><select class="input" value=${f.kit_id} onChange=${set('kit_id')}><option value="">— Nenhum —</option>${st.kits.map((k) => html`<option value=${k.id}>${k.nome}</option>`)}</select><//>
         <${Campo} rotulo="Tags (busca)" cls="span-2"><input class="input" value=${f.tags} onInput=${set('tags')} placeholder="ex.: lapela, wireless, 2.4ghz" /><//>
       </div></div>
@@ -203,6 +246,8 @@ export function FormEquipamento({ inicial, onClose, onSalvo }) {
         <${Campo} rotulo=${editando && inicial.foto_path ? 'Trocar foto do item' : 'Foto do item'}><input class="input" style="padding-top:6px" type="file" accept="image/*" capture="environment" onChange=${(e) => setFoto(e.target.files[0] || null)} /><//>
       </div></div>
       <${Campo} rotulo="Observações"><textarea class="input" value=${f.observacoes} onInput=${set('observacoes')} placeholder="Acessórios que acompanham, cuidados, defeitos conhecidos…"></textarea><//>
+      ${irmaos.length > 0 && html`<label class="check alert info"><input type="checkbox" checked=${emTodas} onChange=${(e) => setEmTodas(e.target.checked)} />
+        <span>Aplicar também às outras <b>${irmaos.length}</b> unidade(s) iguais (${listaCodigos(irmaos)}). Código, nº de série e status continuam individuais.</span></label>`}
     </form><//>`;
 }
 
@@ -221,6 +266,7 @@ export function DetalheEquipamento({ id }) {
   const [editar, setEditar] = useState(false);
   const [problema, setProblema] = useState(false);
   const [mover, setMover] = useState(null);
+  const [duplicar, setDuplicar] = useState(false);
   if (!e) return html`<${Vazio} titulo="Equipamento não encontrado"><a href="#/equipamentos">Voltar</a><//>`;
   const jobs = st.jobs.filter((j) => j.status === 'ativo' && new Date(j.fim) >= new Date() && (j.job_itens || []).some((i) => i.equipamento_id === e.id));
   const eu = minhaPessoa();
@@ -242,14 +288,16 @@ export function DetalheEquipamento({ id }) {
         <button class="btn" onClick=${() => setMover({})}><${Icone} n="saida" s=${16} />Mover</button>
         <button class="btn" onClick=${() => setProblema(true)}><${Icone} n="alerta" s=${16} />Reportar problema</button>
         <button class="btn icon" title="Imprimir etiqueta" onClick=${() => imprimirEtiquetas([e])}><${Icone} n="qr" /></button>
+        ${isAdmin() && html`<button class="btn" title="Criar mais unidades iguais a esta" onClick=${() => setDuplicar(true)}><${Icone} n="copiar" s=${16} />Duplicar</button>`}
         ${isAdmin() && html`<button class="btn icon" title="Editar" onClick=${() => setEditar(true)}><${Icone} n="editar" /></button>`}
       </div></div>
 
     ${e.dono_id && html`<div class="alert colab" style="margin-bottom:10px"><span>◆</span><div><b>Equipamento próprio de ${e.dono_nome}</b> — não pertence à MV LAB e não entra no patrimônio. Pode ser escalado em jobs e emprestado; sempre volta para ${primeiroNome(e.dono_nome)}.</div></div>`}
     <div class=${'alert ' + (e.atrasado ? 'bad' : e.emprestado && e.portador_id ? 'warn' : 'info')} style="margin-bottom:16px"><${Icone} n="usuario" />
       <div>${e.portador_id ? html`Com <b>${e.portador_nome}</b>` : html`<b>Na base</b>${e.localizacao ? ' · ' + e.localizacao : ''}`}${e.posse_desde ? ` desde ${fmtData(e.posse_desde)}` : ''}.
-        ${e.titular_id ? html` Titular: <b>${e.titular_nome}</b>.` : ''}
-        ${e.emprestado && e.portador_id ? html` Emprestado${e.emprestimo_projeto ? ' para ' + e.emprestimo_projeto : ''}${e.emprestimo_ate ? `, volta ${fmtData(e.emprestimo_ate, true)} (${fmtRelativo(e.emprestimo_ate)})` : ''}.` : ''}</div></div>
+        ${e.titular_id ? html` Responsável: <b>${e.titular_nome}</b>.` : ''}
+        ${e.emprestado && e.portador_id && !e.emprestimo_ate ? html` <b>Cedido</b>, sem data de devolução${e.emprestimo_projeto ? ' (' + e.emprestimo_projeto + ')' : ''}.` : ''}
+        ${e.emprestado && e.portador_id && e.emprestimo_ate ? html` Emprestado${e.emprestimo_projeto ? ' para ' + e.emprestimo_projeto : ''}${e.emprestimo_ate ? `, volta ${fmtData(e.emprestimo_ate, true)} (${fmtRelativo(e.emprestimo_ate)})` : ''}.` : ''}</div></div>
 
     <div class="cols-2-1">
       <div>
@@ -264,7 +312,8 @@ export function DetalheEquipamento({ id }) {
             <div><span>Grupo / categoria</span><b>${e.grupo} · ${e.categoria}</b></div>
             <div><span>Localização na base</span><b>${e.localizacao || '—'}</b></div>
             <div><span>Kit</span><b>${e.kit_id ? html`<a href=${'#/kit/' + e.kit_id}>${e.kit_nome}</a>` : '—'}</b></div>
-            <div><span>Proprietário</span><b>${e.proprietario}</b></div>
+            <div><span>Está com</span><b><${EstaCom} e=${e} /></b></div>
+            <div><span>Pertence a</span><b><${PertenceA} e=${e} /></b></div>
             <div><span>Diária de locação</span><b>${fmtMoeda(e.valor_locacao)}</b></div>
             ${isAdmin() && html`<div><span>Valor de compra</span><b>${fmtMoeda(e.valor_compra)}</b></div>`}
             <div><span>Data da compra</span><b>${fmtData(e.data_compra)}</b></div>
@@ -281,6 +330,10 @@ export function DetalheEquipamento({ id }) {
       </div>
       <div class="stack lg">
         <${Foto} path=${e.foto_path} />
+        ${(() => { const un = unidadesDe(e); return un.length > 1 && html`<div class="card flush"><div class="card-head" style="padding:14px 16px 0"><h3><span class="qtd">${un.length}×</span> Unidades iguais</h3></div>
+          <div class="list">${un.slice().sort((a, b) => a.codigo.localeCompare(b.codigo)).map((x) => html`<a key=${x.id} class="li" href=${'#/equipamento/' + x.id} style=${x.id === e.id ? 'background:var(--gold-soft)' : ''}>
+            <div class="grow"><div class="t mono">${x.codigo}${x.id === e.id ? html` <span class="faint small">(esta)</span>` : ''}</div><div class="s">${x.numero_serie ? 'Série ' + x.numero_serie : 'sem nº de série'}</div></div>
+            <span class="small muted nowrap">${x.portador_id ? primeiroNome(x.portador_nome) : 'Base'}</span></a>`)}</div></div>`; })()}
         <div class="card"><div class="card-head"><h3>Próximos jobs</h3></div>
           ${jobs.length ? html`<div class="stack" style="gap:8px">${jobs.map((j) => html`<a href=${'#/job/' + j.id} class="row nw" key=${j.id}><span class="badge b-emprestado plain">${fmtData(j.inicio)}</span><span class="ellipsis">${j.titulo}</span></a>`)}</div>`
             : html`<div class="muted small">Não está escalado em nenhum job.</div>`}</div>
@@ -289,9 +342,51 @@ export function DetalheEquipamento({ id }) {
       </div>
     </div>
     ${editar && html`<${FormEquipamento} inicial=${e} onClose=${() => setEditar(false)} onSalvo=${() => {}} />`}
+    ${duplicar && html`<${DuplicarModal} e=${e} onClose=${() => setDuplicar(false)} />`}
     ${problema && html`<${ReportarProblema} eq=${e} onClose=${() => setProblema(false)} />`}
     ${mover && html`<${MoverModal} itens=${itemMov} para=${mover.para} tipo=${mover.tipo} onClose=${() => setMover(null)} />`}
   </div>`;
+}
+
+// Cria cópias de um item (mesmo cadastro, código automático, nº de série próprio). As cópias formam o grupo "N×".
+const CAMPOS_COPIA = ['nome', 'categoria', 'marca', 'modelo', 'condicao', 'localizacao', 'proprietario', 'valor_compra', 'valor_locacao', 'data_compra', 'fornecedor', 'nf_numero', 'garantia_ate', 'seguro_apolice', 'tags', 'observacoes', 'foto_path', 'dono_id'];
+export function DuplicarModal({ e, onClose }) {
+  const [n, setN] = useState(1);
+  const [series, setSeries] = useState('');
+  const [titular, setTitular] = useState(e.titular_id || '');
+  const [nfs, setNfs] = useState([]);
+  const [copiarNf, setCopiarNf] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+  useEffect(() => { q(sb.from('anexos').select('*').eq('equipamento_id', e.id).eq('tipo', 'nota_fiscal')).then(setNfs).catch(() => {}); }, [e.id]);
+  const total = unidadesDe(e).length;
+  const criar = async () => {
+    const qt = Math.max(1, Math.min(50, Number(n) || 1));
+    const ns = series.split(/\r?\n/).map((x) => x.trim());
+    const base = Object.fromEntries(CAMPOS_COPIA.map((k) => [k, e[k] ?? null]));
+    base.status = 'ok';
+    if (!e.dono_id) { base.titular_id = titular || null; base.portador_id = titular || null; }
+    setEnviando(true);
+    try {
+      const novos = await q(sb.from('equipamentos').insert(Array.from({ length: qt }, (_, i) => ({ ...base, numero_serie: ns[i] || null }))).select());
+      if (copiarNf && nfs.length) await q(sb.from('anexos').insert(novos.flatMap((x) => nfs.map((a) => ({ equipamento_id: x.id, tipo: a.tipo, nome: a.nome, path: a.path, tamanho: a.tamanho, mime: a.mime })))));
+      await carregarTudo();
+      toast(`${qt} unidade(s) criada(s): ${listaCodigos(novos, 4)}. Agora são ${total + qt}× ${e.nome}.`, 'ok');
+      onClose();
+    } catch (err) { toast(msgErro(err), 'erro'); }
+    setEnviando(false);
+  };
+  return html`<${Modal} titulo=${'Duplicar ' + e.nome} onClose=${onClose}
+    rodape=${html`<button class="btn" onClick=${onClose}>Cancelar</button><button class="btn primary" disabled=${enviando} onClick=${criar}><${Icone} n="copiar" s=${16} />${enviando ? 'Criando…' : `Criar ${Number(n) || 1} unidade(s)`}</button>`}>
+    <div class="stack">
+      <div class="small muted">As cópias recebem o mesmo cadastro (nome, categoria, valor, nota fiscal, foto…), código automático e nº de série próprio. No app elas aparecem juntas como <b>${total + (Number(n) || 1)}× ${e.nome}</b>.</div>
+      <div class="grid-form">
+        <${Campo} rotulo="Quantas cópias"><input class="input" type="number" min="1" max="50" value=${n} onInput=${(ev) => setN(ev.target.value)} autofocus /><//>
+        ${!e.dono_id && html`<${Campo} rotulo="Ficam com"><select class="input" value=${titular} onChange=${(ev) => setTitular(ev.target.value)}>
+          <option value="">Base</option>${pessoasAtivas().map((p) => html`<option value=${p.id}>${p.nome}</option>`)}</select><//>`}
+      </div>
+      <${Campo} rotulo="Nºs de série das cópias (um por linha, opcional)"><textarea class="input mono" rows="3" value=${series} onInput=${(ev) => setSeries(ev.target.value)}></textarea><//>
+      ${nfs.length > 0 && html`<label class="check"><input type="checkbox" checked=${copiarNf} onChange=${(ev) => setCopiarNf(ev.target.checked)} />Anexar também a nota fiscal (${nfs.map((a) => a.nome).join(', ')})</label>`}
+    </div><//>`;
 }
 
 export function ReportarProblema({ eq, onClose }) {
@@ -324,7 +419,12 @@ function Anexos({ eq }) {
   const abrir = async (a) => { const u = await urlArquivo(a.path); u ? window.open(u, '_blank', 'noopener') : toast('Não foi possível abrir o arquivo.', 'erro'); };
   const apagar = async (a) => {
     if (!(await confirmar(`Remover "${a.nome}"?`, { perigo: true, ok: 'Remover' }))) return;
-    await acao(async () => { await sb.storage.from('anexos').remove([a.path]); await q(sb.from('anexos').delete().eq('id', a.id)); }, 'Removido.');
+    await acao(async () => {
+      await q(sb.from('anexos').delete().eq('id', a.id));
+      // a mesma nota fiscal pode estar anexada a várias unidades iguais: só apaga o arquivo quando ninguém mais usa
+      const resto = await q(sb.from('anexos').select('id').eq('path', a.path).limit(1));
+      if (!resto.length) await sb.storage.from('anexos').remove([a.path]);
+    }, 'Removido.');
     carregar();
   };
   const usarComoFoto = (a) => acao(() => q(sb.from('equipamentos').update({ foto_path: a.path }).eq('id', eq.id)), 'Foto principal atualizada.');
@@ -353,6 +453,7 @@ function Historico({ eq }) {
 
 // ================================================================== IMPORTAÇÃO CSV
 const ALIAS = {
+  quantidade: ['quantidade', 'qtd', 'qtde', 'quant', 'unidades'],
   codigo: ['codigo', 'código', 'patrimonio', 'patrimônio', 'etiqueta', 'id'],
   nome: ['nome', 'equipamento', 'item', 'descricao', 'descrição'],
   categoria: ['categoria', 'tipo', 'grupo'],
@@ -408,7 +509,7 @@ function Importar({ onClose }) {
         valor_compra: numeroBR(v(row, 'valor_compra')), valor_locacao: numeroBR(v(row, 'valor_locacao')),
         data_compra: dataBR(v(row, 'data_compra')), fornecedor: v(row, 'fornecedor'), nf_numero: v(row, 'nf_numero'),
         garantia_ate: dataBR(v(row, 'garantia_ate')), seguro_apolice: v(row, 'seguro_apolice'), tags: v(row, 'tags'),
-        observacoes: v(row, 'observacoes'), _kit: v(row, 'kit'),
+        observacoes: v(row, 'observacoes'), _kit: v(row, 'kit'), _qtd: Math.max(1, Math.min(50, parseInt(v(row, 'quantidade') || '1', 10) || 1)),
       };
     }).filter((r) => r.nome);
   }, [linhas, mapa]);
@@ -424,7 +525,7 @@ function Importar({ onClose }) {
     const pessoasMap = new Map(store.get().pessoas.map((p) => [normalizar(p.nome), p]));
     const vinculos = [];
     for (const r of registros) {
-      const { _kit, _pessoa, _dono, ...reg } = r;
+      const { _kit, _pessoa, _dono, _qtd, ...reg } = r;
       if (_dono) {
         let p = pessoasMap.get(normalizar(_dono)) || [...pessoasMap.entries()].find(([n]) => n.split(' ')[0] === normalizar(_dono).split(' ')[0])?.[1];
         if (!p) { try { p = await q(sb.from('pessoas').insert({ nome: _dono }).select().single()); pessoasMap.set(normalizar(_dono), p); } catch (_) {} }
@@ -444,11 +545,16 @@ function Importar({ onClose }) {
           if (modo === 'pular') { feito++; setProg({ feito, total: registros.length, erros }); continue; }
           delete reg.status;
           salvo = await q(sb.from('equipamentos').update(reg).eq('id', ex.id).select('id').single());
+        } else if (_qtd > 1) {
+          // coluna "quantidade": cria N unidades iguais (código automático; o nº de série fica só na primeira)
+          const { codigo: _c, ...semCodigo } = reg;
+          const lote = await q(sb.from('equipamentos').insert(Array.from({ length: _qtd }, (_, i) => ({ ...semCodigo, numero_serie: i ? null : semCodigo.numero_serie ?? null }))).select('id'));
+          salvo = lote[0]; salvo._lote = lote;
         } else salvo = await q(sb.from('equipamentos').insert(reg).select('id').single());
         if (_kit) {
           let k = kits.get(normalizar(_kit));
           if (!k) { k = await q(sb.from('kits').insert({ nome: _kit }).select().single()); kits.set(normalizar(_kit), k); }
-          vinculos.push({ kit_id: k.id, equipamento_id: salvo.id });
+          (salvo._lote || [salvo]).forEach((x) => vinculos.push({ kit_id: k.id, equipamento_id: x.id }));
         }
       } catch (e) { erros.push(`${r.nome}: ${msgErro(e)}`); }
       feito++; setProg({ feito, total: registros.length, erros: [...erros] });
@@ -468,15 +574,15 @@ function Importar({ onClose }) {
     rodape=${prog?.fim ? html`<button class="btn primary" onClick=${onClose}>Fechar</button>`
       : html`<button class="btn" onClick=${onClose} disabled=${!!prog}>Cancelar</button><button class="btn primary" disabled=${!registros.length || !!prog} onClick=${importar}>Importar ${registros.length || ''} itens</button>`}>
     <div class="stack">
-      ${!linhas && html`<p class="muted" style="margin:0">Aceita CSV separado por ponto e vírgula ou vírgula (Excel/Google Sheets → Salvar como CSV). Colunas reconhecidas: nome (obrigatória), código, categoria, marca, modelo, nº série, status, local, valor, locação/diária, data de compra, fornecedor, nota fiscal, garantia, seguro, tags, kit, titular (com quem fica — ex.: "Gian"; vazio = base), dono (só para equipamento próprio de colaborador — ex.: "Junior Mantovani"), observações. Sem código, o sistema gera MV-0001, MV-0002…</p>
+      ${!linhas && html`<p class="muted" style="margin:0">Aceita CSV separado por ponto e vírgula ou vírgula (Excel/Google Sheets → Salvar como CSV). Colunas reconhecidas: nome (obrigatória), quantidade (cria unidades iguais), código, categoria, marca, modelo, nº série, status, local, valor, locação/diária, data de compra, fornecedor, nota fiscal, garantia, seguro, tags, kit, titular (com quem fica — ex.: "Gian"; vazio = base), dono (só para equipamento próprio de colaborador — ex.: "Junior Mantovani"), observações. Sem código, o sistema gera MV-0001, MV-0002…</p>
         <div class="row"><label class="btn primary"><${Icone} n="subir" s=${16} />Escolher arquivo CSV<input type="file" class="hidden" accept=".csv,text/csv" onChange=${ler} /></label>
         <button class="btn ghost" onClick=${modelo}><${Icone} n="baixar" s=${16} />Baixar modelo</button></div>`}
       ${linhas && !prog && html`
         <div class="alert info"><div>${registros.length} itens lidos. Colunas reconhecidas: ${Object.keys(mapa).join(', ')}.${dup ? html`<br /><b>${dup}</b> já existem (mesmo código ou nº de série).` : ''}</div></div>
         ${dup > 0 && html`<div class="row"><label class="check"><input type="radio" name="m" checked=${modo === 'pular'} onChange=${() => setModo('pular')} />Pular os que já existem</label>
           <label class="check"><input type="radio" name="m" checked=${modo === 'atualizar'} onChange=${() => setModo('atualizar')} />Atualizar os que já existem</label></div>`}
-        <div class="tbl-wrap card flush" style="max-height:320px;overflow:auto"><table class="tbl"><thead><tr><th>Nome</th><th>Categoria</th><th>Série</th><th class="right">Valor</th><th class="right">Diária</th><th>Kit</th></tr></thead>
-          <tbody>${registros.slice(0, 200).map((r) => html`<tr><td>${r.nome}${achar(r) ? html` <span class="badge b-neutro plain">existe</span>` : ''}</td><td>${r.categoria}</td><td class="mono">${r.numero_serie || '—'}</td><td class="right nowrap">${fmtMoeda(r.valor_compra)}</td><td class="right nowrap">${fmtMoeda(r.valor_locacao)}</td><td>${r._kit || ''}</td></tr>`)}</tbody></table></div>`}
+        <div class="tbl-wrap card flush" style="max-height:320px;overflow:auto"><table class="tbl"><thead><tr><th>Nome</th><th class="right">Qtd</th><th>Categoria</th><th>Série</th><th class="right">Valor</th><th class="right">Diária</th><th>Kit</th></tr></thead>
+          <tbody>${registros.slice(0, 200).map((r) => html`<tr><td>${r.nome}${achar(r) ? html` <span class="badge b-neutro plain">existe</span>` : ''}</td><td class="right">${r._qtd}</td><td>${r.categoria}</td><td class="mono">${r.numero_serie || '—'}</td><td class="right nowrap">${fmtMoeda(r.valor_compra)}</td><td class="right nowrap">${fmtMoeda(r.valor_locacao)}</td><td>${r._kit || ''}</td></tr>`)}</tbody></table></div>`}
       ${prog && html`<div class="stack"><div>${prog.fim ? 'Concluído' : 'Importando…'} ${prog.feito}/${prog.total}</div>
         <div style="height:6px;background:var(--surface-3);border-radius:4px"><div style=${`height:100%;width:${(prog.feito / prog.total) * 100}%;background:var(--gold);border-radius:4px`}></div></div>
         ${prog.erros.length > 0 && html`<div class="alert bad"><div>${prog.erros.slice(0, 20).map((e) => html`<div>${e}</div>`)}</div></div>`}</div>`}

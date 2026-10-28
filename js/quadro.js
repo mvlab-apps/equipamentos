@@ -3,6 +3,7 @@ import {
   html, useState, useEffect, useMemo, sb, store, useStore, ir, q, acao, toast, msgErro, isAdmin,
   GRUPOS, fmtData, fmtMoeda, fmtRelativo, paraLocalInput, deLocalInput, normalizar,
   Icone, Badge, Campo, Modal, Vazio, Busca, nomePessoa, pessoasAtivas, minhaPessoa, carregarTudo, kitPorId, primeiroNome,
+  chaveUnidade, agrupar, listaCodigos, Stepper, corDono, corPessoa, Ponto,
 } from './core.js';
 import { buscarEquip, SeletorItens } from './picker.js';
 import { resumoJob, jobAtivo } from './cobertura.js';
@@ -14,7 +15,18 @@ const ordemEq = (a, b) => GRUPOS.indexOf(a.grupo) - GRUPOS.indexOf(b.grupo) || a
 // ================================================================== MOVER (modal reutilizado no app inteiro)
 export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projeto: projetoInicial = '', ate: ateInicial, jobId = null, onClose, onFeito }) {
   const st = useStore();
-  const lista = itens.map((i) => ({ ...i, e: st.equipamentos.find((x) => x.id === i.equipamento_id) })).filter((x) => x.e);
+  const pedidos = itens.map((i) => ({ ...i, e: st.equipamentos.find((x) => x.id === i.equipamento_id) })).filter((x) => x.e);
+  // kit fixo vai sempre inteiro: completa com os itens que faltarem
+  const idsPedidos = new Set(pedidos.map((x) => x.e.id));
+  const kitsFixos = [...new Set(pedidos.map((x) => x.e.kit_id).filter((kid) => kitPorId(kid)?.modo === 'fixo'))];
+  const completados = kitsFixos.flatMap((kid) => st.equipamentos.filter((e) => e.kit_id === kid && e.status !== 'baixado' && !idsPedidos.has(e.id)).map((e) => ({ equipamento_id: e.id, kit_id: kid, e })));
+  const todos = [...pedidos, ...completados];
+  // unidades iguais viram uma linha "N×" com contador: dá para mover só parte delas
+  const chG = (x) => chaveUnidade(x.e) + '|' + (x.kit_id || x.e.kit_id || '');
+  const grupos = agrupar(todos, chG);
+  const [qtd, setQtd] = useState({});
+  const nDe = (g) => qtd[chG(g[0])] ?? g.length;
+  const lista = grupos.flatMap((g) => g.slice(0, nDe(g)));
   const temEmprestado = lista.some((x) => x.e.emprestado);
   const colabs = lista.filter((x) => x.e.dono_id);
   const [para, setPara] = useState(paraInicial === undefined ? '' : paraInicial === null ? BASE : paraInicial);
@@ -30,6 +42,8 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
   useEffect(() => { if (!tipoInicial) setTipo(tipoPadrao()); }, [para]);
   const amanha = new Date(); amanha.setDate(amanha.getDate() + 1); amanha.setHours(19, 0, 0, 0);
   const [ate, setAte] = useState(paraLocalInput(ateInicial || amanha));
+  // empréstimo sem data = posse permanente ("cedido"): o item continua sendo do titular, mas fica com a pessoa até alguém devolver
+  const [semData, setSemData] = useState(() => !ateInicial && todos.length > 0 && todos.every((x) => x.e.dono_id));
   const [projeto, setProjeto] = useState(projetoInicial);
   const [obs, setObs] = useState('');
   const [nova, setNova] = useState('');
@@ -46,13 +60,14 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
       try { const p = await q(sb.from('pessoas').insert({ nome: nova.trim(), funcao: 'Externo', externo: true }).select().single()); alvo = p.id; }
       catch (e) { return toast(msgErro(e), 'erro'); }
     }
+    if (!lista.length) return toast('Nenhum item selecionado.', 'erro');
     if (tipo !== 'devolver' && para === '') return toast('Escolha para onde vão os itens.', 'erro');
     if (tipo === 'transferir' && colabs.length) return toast(`Equipamento de colaborador não pode ser transferido nem guardado na base: ${colabs.map((x) => x.e.codigo).join(', ')}. Use Emprestar, ou tire esses itens da seleção.`, 'erro');
     if (tipo === 'emprestar' && !alvo) return toast('Empréstimo precisa de uma pessoa (não da base).', 'erro');
     setEnviando(true);
     const ok = await acao(() => q(sb.rpc('mover_itens', {
       p_itens: lista.map((x) => ({ equipamento_id: x.e.id, kit_id: x.kit_id || x.e.kit_id || null })), p_para: tipo === 'devolver' ? null : alvo ?? null,
-      p_tipo: tipo, p_ate: tipo === 'emprestar' ? deLocalInput(ate) : null, p_projeto: projeto, p_obs: obs, p_job_id: jobId,
+      p_tipo: tipo, p_ate: tipo === 'emprestar' && !semData ? deLocalInput(ate) : null, p_projeto: projeto, p_obs: obs, p_job_id: jobId,
     })), `${mudam.length || lista.length} item(ns) movido(s).`);
     setEnviando(false);
     if (ok) { await carregarTudo(); onFeito && onFeito(); onClose(); }
@@ -79,15 +94,25 @@ export function MoverModal({ itens, para: paraInicial, tipo: tipoInicial, projet
         <label class="check" style=${colabs.length ? 'opacity:.5' : ''}><input type="radio" name="tipo" disabled=${colabs.length > 0} checked=${tipo === 'transferir'} onChange=${() => setTipo('transferir')} />
           <span><b>${para === BASE ? 'Guardar na base' : 'Transferir'}</b> <span class="muted">— ${para === BASE ? 'deixa de ter titular' : `passa a ser de ${nomeDestino} (titular)`}</span></span></label>
         <label class="check" style=${para === BASE ? 'opacity:.5' : ''}><input type="radio" name="tipo" disabled=${para === BASE} checked=${tipo === 'emprestar'} onChange=${() => setTipo('emprestar')} />
-          <span><b>Emprestar</b> <span class="muted">— fica com ${nomeDestino} até a data abaixo e depois volta para o titular</span></span></label>
+          <span><b>Emprestar / ceder</b> <span class="muted">— fica com ${nomeDestino}, mas continua sendo do titular. Com data de devolução, ou sem data (posse permanente)</span></span></label>
         ${temEmprestado && html`<label class="check"><input type="radio" name="tipo" checked=${tipo === 'devolver'} onChange=${() => setTipo('devolver')} />
           <span><b>Devolver ao titular</b> <span class="muted">— cada item volta para quem é o dono dele</span></span></label>`}
       </div>
-      ${tipo === 'emprestar' && html`<div class="grid-form"><${Campo} rotulo="Volta até"><input class="input" type="datetime-local" value=${ate} onInput=${(e) => setAte(e.target.value)} /><//>
+      ${completados.length > 0 && html`<div class="alert info small"><${Icone} n="kit" s=${16} /><div>Kit fixo vai inteiro: ${kitsFixos.map((kid) => kitPorId(kid)?.nome).join(', ')} (+${completados.length} item(ns) incluído(s) automaticamente).</div></div>`}
+      ${tipo === 'emprestar' && html`<div class="grid-form"><${Campo} rotulo="Devolução">
+          <label class="check" style="margin-bottom:6px"><input type="checkbox" checked=${semData} onChange=${(e) => setSemData(e.target.checked)} />Sem data — fica com a pessoa até alguém devolver</label>
+          ${!semData && html`<input class="input" type="datetime-local" value=${ate} onInput=${(e) => setAte(e.target.value)} />`}<//>
         <${Campo} rotulo="Observação"><input class="input" value=${obs} onInput=${(e) => setObs(e.target.value)} /><//></div>`}
-      <div class="card flush"><div class="list">${linhas.map((l) => html`<div class="li" key=${l.e.id}>
-        <div class="grow"><div class="t ellipsis">${l.e.nome}</div><div class="s"><span class="mono">${l.e.codigo}</span>${l.e.kit_nome ? ' · ' + l.e.kit_nome : ''}${l.e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${primeiroNome(l.e.dono_nome)}</span>` : l.e.titular_id ? ' · titular: ' + l.e.titular_nome : ''}</div></div>
-        <span class="small muted nowrap">${nomePessoa(l.de)} → <b style="color:var(--text)">${tipo === 'devolver' ? nomePessoa(l.para) : nomeDestino}</b></span></div>`)}</div></div>
+      <div class="card flush"><div class="list">${grupos.map((g) => {
+        const n = nDe(g); const usados = g.slice(0, n); const e = g[0].e; const k = chG(g[0]);
+        const de = [...new Set(usados.map((x) => nomePessoa(x.e.portador_id)))].join(', ') || nomePessoa(e.portador_id);
+        const pra = tipo === 'devolver' ? [...new Set(usados.map((x) => nomePessoa(destinoDe(x.e))))].join(', ') : nomeDestino;
+        return html`<div class="li" key=${k} style=${n === 0 ? 'opacity:.45' : ''}>
+          ${g.length > 1 && html`<span class="qtd">${n}×</span>`}
+          <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${g.length > 1 ? (n ? listaCodigos(usados.map((x) => x.e)) : 'nenhuma unidade') : e.codigo}</span>${e.kit_nome ? ' · ' + e.kit_nome : ''}${e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${primeiroNome(e.dono_nome)}</span>` : e.titular_id ? ' · titular: ' + e.titular_nome : ''}</div></div>
+          ${g.length > 1 && kitPorId(e.kit_id)?.modo !== 'fixo' && html`<${Stepper} valor=${n} min=${0} max=${g.length} rotulo="Quantas unidades mover" onChange=${(v) => setQtd({ ...qtd, [k]: v })} />`}
+          <span class="small muted nowrap">${de} → <b style="color:var(--text)">${pra}</b></span></div>`;
+      })}</div></div>
     </div><//>`;
 }
 
@@ -104,9 +129,18 @@ function Conferencia({ pessoa, itens, onClose }) {
   return html`<${Modal} largo titulo=${'Conferência — ' + nomePessoa(pessoa)} onClose=${() => onClose(false)}
     rodape=${html`<button class="btn" onClick=${() => onClose(false)}>Cancelar</button><button class="btn primary" onClick=${salvar}>Salvar conferência</button>`}>
     <div class="stack"><div class="muted small">Desmarque o que <b>não</b> estiver com ${pessoa ? 'a pessoa' : 'a base'}. Itens faltando ficam registrados no histórico deles.</div>
-      <div class="card flush" style="max-height:50vh;overflow:auto"><div class="list">${itens.map((e) => html`<label class="li click" key=${e.id}>
-        <input type="checkbox" class="check" checked=${ok.has(e.id)} onChange=${() => tg(e.id)} />
-        <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''}</div></div></label>`)}</div></div>
+      <div class="card flush" style="max-height:50vh;overflow:auto"><div class="list">${agrupar(itens, (e) => chaveUnidade(e) + '|' + (e.kit_id || '')).map((g) => {
+        const e = g[0];
+        if (g.length === 1) return html`<label class="li click" key=${e.id}>
+          <input type="checkbox" class="check" checked=${ok.has(e.id)} onChange=${() => tg(e.id)} />
+          <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''}</div></div></label>`;
+        const achados = g.filter((x) => ok.has(x.id)).length;
+        // unidades iguais: informa quantas foram encontradas; as que faltarem são marcadas a partir do fim da lista
+        const definir = (n) => { const s = new Set(ok); g.forEach((x, i) => (i < n ? s.add(x.id) : s.delete(x.id))); setOk(s); };
+        return html`<div class="li" key=${e.id}><span class="qtd">${g.length}×</span>
+          <div class="grow"><div class="t ellipsis">${e.nome}</div><div class="s"><span class="mono">${listaCodigos(g, 4)}</span> · ${e.categoria}${e.kit_nome ? ' · ' + e.kit_nome : ''}</div></div>
+          <span class="small muted nowrap">encontradas</span><${Stepper} valor=${achados} min=${0} max=${g.length} onChange=${definir} /></div>`;
+      })}</div></div>
       <${Campo} rotulo="Observações"><input class="input" value=${obs} onInput=${(e) => setObs(e.target.value)} /><//>
       <div class="small muted">${ok.size}/${itens.length} conferidos</div></div><//>`;
 }
@@ -124,6 +158,7 @@ export function Quadro({ query }) {
   const [conf, setConf] = useState(null);
   const [ultConf, setUltConf] = useState({});
   const [sobre, setSobre] = useState(null);
+  const [gruposAbertos, setGruposAbertos] = useState(new Set());
   const [fechados, setFechados] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('kits_fechados') || '[]')); } catch (_) { return new Set(); } });
 
   useEffect(() => {
@@ -154,15 +189,41 @@ export function Quadro({ query }) {
   const arrastar = (ev, itens) => { ev.dataTransfer.setData('text/plain', JSON.stringify({ itens })); ev.dataTransfer.effectAllowed = 'move'; };
   const fecharKit = (k) => { const s = new Set(fechados); s.has(k) ? s.delete(k) : s.add(k); setFechados(s); try { localStorage.setItem('kits_fechados', JSON.stringify([...s])); } catch (_) {} };
 
+  const extras = (e) => html`${e.emprestado && e.portador_id ? html` · <span style=${'color:' + (e.atrasado ? 'var(--bad)' : corDono(e) || 'var(--res)')}>${e.emprestimo_ate ? 'de ' : 'cedido por '}${e.dono_id ? primeiroNome(e.dono_nome) : e.titular_nome ? primeiroNome(e.titular_nome) : 'base'}${e.emprestimo_ate ? ', volta ' + fmtData(e.emprestimo_ate) : ''}</span>` : ''}
+    ${e.status !== 'ok' ? html` · <span style="color:var(--warn)">${e.status === 'manutencao' ? 'manutenção' : e.status}</span>` : ''}`;
+  // unidades iguais na mesma situação viram uma linha "N×"
+  const chaveQ = (e) => chaveUnidade(e) + '|' + (e.titular_id || '') + '|' + (e.emprestado ? e.emprestimo_ate || 'e' : '') + '|' + e.status;
+  const abrirGrupo = (gk) => { const s = new Set(gruposAbertos); s.has(gk) ? s.delete(gk) : s.add(gk); setGruposAbertos(s); };
+  const GrupoLinha = ({ g, gk }) => {
+    const e = g[0]; const ids = g.map((x) => x.id); const nSel = ids.filter((id) => sel.has(id)).length; const aberto = gruposAbertos.has(gk);
+    return html`<div key=${gk} class="qgrupo">
+      <div class=${'qitem grupo' + (nSel === g.length ? ' sel' : '') + (e.dono_id ? ' colab' : '') + (corDono(e) ? ' tem-cor' : '')} style=${corDono(e) ? '--cor:' + corDono(e) : ''} draggable=${!selecionando && !travado(e)}
+        title=${g.length + ' unidades iguais · ' + g.map((x) => x.codigo).join(', ')}
+        onDragStart=${(ev) => arrastar(ev, g.map((x) => ({ equipamento_id: x.id, kit_id: x.kit_id })))}
+        onClick=${() => (selecionando ? toggle(travado(e) ? idsKit(e.kit_id) : ids) : abrirGrupo(gk))}>
+        ${selecionando && html`<input type="checkbox" class="check" checked=${nSel === g.length} ref=${(el) => { if (el) el.indeterminate = nSel > 0 && nSel < g.length; }} onClick=${(ev) => ev.stopPropagation()} onChange=${() => toggle(ids)} />`}
+        <span class="qtd">${g.length}×</span>
+        <div class="grow" style="min-width:0"><div class="qnome">${e.nome}</div>
+          <div class="qmeta">${e.dono_id ? html`<span class="tag-colab">próprio${e.portador_id !== e.dono_id ? ' de ' + primeiroNome(e.dono_nome) : ''}</span> · ` : ''}<span class="mono">${listaCodigos(g, 2)}</span> · ${e.categoria}${extras(e)}</div></div>
+        <span class="caret" title="Ver unidades" onClick=${(ev) => { ev.stopPropagation(); abrirGrupo(gk); }}>${aberto ? '▾' : '▸'}</span>
+      </div>
+      ${aberto && html`<div class="qsub">${g.map((x) => ItemLinha({ e: x }))}</div>`}
+    </div>`;
+  };
+  const Linhas = (arr, prefixo) => agrupar(arr, chaveQ).map((g) => (g.length === 1 ? ItemLinha({ e: g[0] }) : GrupoLinha({ g, gk: prefixo + '|' + chaveQ(g[0]) })));
+
+  // item de kit fixo não sai sozinho: arrastar/selecionar pega o kit inteiro
+  const travado = (e) => !!e.kit_id && kitPorId(e.kit_id)?.modo === 'fixo';
+  const idsKit = (kid) => st.equipamentos.filter((x) => x.kit_id === kid && x.status !== 'baixado').map((x) => x.id);
   const ItemLinha = ({ e }) => {
-    const marcado = sel.has(e.id);
-    return html`<div key=${e.id} class=${'qitem' + (marcado ? ' sel' : '') + (e.dono_id ? ' colab' : '')} title=${e.dono_id ? 'Equipamento próprio de ' + e.dono_nome + ' (não pertence à produtora)' : ''} draggable=${!selecionando} onDragStart=${(ev) => arrastar(ev, [{ equipamento_id: e.id, kit_id: e.kit_id }])}
-      onClick=${() => (selecionando ? toggle([e.id]) : ir('/equipamento/' + e.id))}>
-      ${selecionando && html`<input type="checkbox" class="check" checked=${marcado} onClick=${(ev) => ev.stopPropagation()} onChange=${() => toggle([e.id])} />`}
+    const marcado = sel.has(e.id); const cor = corDono(e);
+    return html`<div key=${e.id} class=${'qitem' + (marcado ? ' sel' : '') + (e.dono_id ? ' colab' : '') + (cor ? ' tem-cor' : '')} style=${cor ? '--cor:' + cor : ''}
+      title=${(e.dono_id ? 'Equipamento próprio de ' + e.dono_nome + ' (não pertence à produtora)' : e.titular_id ? 'Responsável: ' + e.titular_nome : '') + (travado(e) ? ' · kit fixo: vai inteiro' : '')}
+      draggable=${!selecionando && !travado(e)} onDragStart=${(ev) => arrastar(ev, [{ equipamento_id: e.id, kit_id: e.kit_id }])}
+      onClick=${() => (selecionando ? toggle(travado(e) ? idsKit(e.kit_id) : [e.id]) : ir('/equipamento/' + e.id))}>
+      ${selecionando && html`<input type="checkbox" class="check" checked=${marcado} onClick=${(ev) => ev.stopPropagation()} onChange=${() => toggle(travado(e) ? idsKit(e.kit_id) : [e.id])} />`}
       <div class="grow" style="min-width:0"><div class="qnome">${e.nome}</div>
-        <div class="qmeta">${e.dono_id ? html`<span class="tag-colab">próprio${e.portador_id !== e.dono_id ? ' de ' + primeiroNome(e.dono_nome) : ''}</span> · ` : ''}<span class="mono">${e.codigo}</span> · ${e.categoria}
-          ${e.emprestado && e.portador_id ? html` · <span style=${'color:' + (e.atrasado ? 'var(--bad)' : 'var(--res)')}>de ${e.titular_nome ? e.titular_nome.split(' ')[0] : 'base'}${e.emprestimo_ate ? ', volta ' + fmtData(e.emprestimo_ate) : ''}</span>` : ''}
-          ${e.status !== 'ok' ? html` · <span style="color:var(--warn)">${e.status === 'manutencao' ? 'manutenção' : e.status}</span>` : ''}</div></div>
+        <div class="qmeta">${e.dono_id ? html`<span class="tag-colab">próprio${e.portador_id !== e.dono_id ? ' de ' + primeiroNome(e.dono_nome) : ''}</span> · ` : ''}<span class="mono">${e.codigo}</span> · ${e.categoria}${extras(e)}</div></div>
     </div>`;
   };
 
@@ -174,7 +235,8 @@ export function Quadro({ query }) {
     const uc = ultConf[k];
     const valor = itens.filter((e) => !e.dono_id).reduce((s, e) => s + (Number(e.valor_compra) || 0), 0);
     const nColab = itens.filter((e) => e.dono_id).length;
-    return html`<section key=${k} class=${'qcol' + (sobre === k ? ' alvo' : '') + (eu && eu.id === c.id ? ' eu' : '')}
+    const corCol = corPessoa(c.id);
+    return html`<section key=${k} class=${'qcol' + (sobre === k ? ' alvo' : '') + (eu && eu.id === c.id ? ' eu' : '') + (corCol ? ' tem-cor' : '')} style=${corCol ? '--cor:' + corCol : ''}
       onDragOver=${(ev) => { ev.preventDefault(); if (sobre !== k) setSobre(k); }} onDragLeave=${(ev) => { if (!ev.currentTarget.contains(ev.relatedTarget)) setSobre(null); }}
       onDrop=${(ev) => onDrop(ev, c.id)}>
       <header class="qhead">
@@ -189,19 +251,22 @@ export function Quadro({ query }) {
       </header>
       <div class="qbody">
         ${Object.entries(kits).map(([kid, arr]) => {
-          const kit = kitPorId(kid); const total = st.equipamentos.filter((e) => e.kit_id === kid && e.status !== 'baixado').length; const fk = k + kid;
+          const kit = kitPorId(kid); const membros = st.equipamentos.filter((e) => e.kit_id === kid && e.status !== 'baixado'); const total = membros.length; const fk = k + kid;
+          const fora = membros.filter((e) => chave(e.portador_id) !== k);
           return html`<div class=${'qkit' + (arr.every((e) => e.dono_id) ? ' colab' : '')} key=${kid}>
             <div class="qkit-h" draggable=${!selecionando} onDragStart=${(ev) => arrastar(ev, arr.map((e) => ({ equipamento_id: e.id, kit_id: kid })))}
               onClick=${() => (selecionando ? toggle(arr.map((e) => e.id)) : fecharKit(fk))}>
               <span class="caret">${fechados.has(fk) ? '▸' : '▾'}</span><b class="ellipsis grow">${kit?.nome || 'Kit'}</b>
+              ${kit?.modo === 'fixo' ? html`<span class="badge b-fixo plain" title="Kit fixo: os itens vão sempre juntos">fixo</span>` : ''}
               ${kit?.tipo && html`<span class="badge b-gold plain">${kit.tipo}</span>`}
               <span class="small muted">${arr.length}${arr.length < total ? '/' + total : ''}</span>
               <a href=${'#/kit/' + kid} class="small" onClick=${(ev) => ev.stopPropagation()} title="Abrir kit">↗</a>
             </div>
-            ${!fechados.has(fk) && arr.map((e) => ItemLinha({ e }))}
+            ${fora.length > 0 && arr.length >= fora.length && html`<div class="qkit-fora">Fora do kit: ${fora.slice(0, 3).map((e) => `${e.nome} com ${e.portador_id ? primeiroNome(nomePessoa(e.portador_id)) : 'a base'}`).join(' · ')}${fora.length > 3 ? ` · +${fora.length - 3}` : ''}</div>`}
+            ${!fechados.has(fk) && Linhas(arr, fk)}
           </div>`;
         })}
-        ${soltos.map((e) => ItemLinha({ e }))}
+        ${Linhas(soltos, k)}
         ${!itens.length && html`<div class="qvazio">${termo || grupo ? 'Nada com este filtro' : 'Arraste itens para cá'}</div>`}
       </div>
     </section>`;
@@ -232,6 +297,8 @@ export function Quadro({ query }) {
       </div>
       <div class="chips"><button class=${'chip' + (!grupo ? ' on' : '')} onClick=${() => setGrupo('')}>Todos</button>
         ${GRUPOS.filter((g) => st.equipamentos.some((e) => e.grupo === g)).map((g) => html`<button class=${'chip' + (grupo === g ? ' on' : '')} onClick=${() => setGrupo(grupo === g ? '' : g)}>${g} <span class="n">${st.equipamentos.filter((e) => e.grupo === g && e.status !== 'baixado').length}</span></button>`)}</div>
+      ${vista === 'quadro' && html`<div class="legenda-cores"><span>A faixa colorida mostra de quem é o item (dono ou responsável). Faixa de outra cor na coluna = emprestado ou cedido.</span>
+        ${pessoasAtivas().filter((p) => p.cor).map((p) => html`<span class="nowrap"><${Ponto} cor=${p.cor} />${primeiroNome(p.nome)}</span>`)}</div>`}
     </div>
 
     ${vista === 'quadro'
@@ -258,7 +325,7 @@ function TabelaDinamica({ itens, colunas, onCelula }) {
   return html`<div class="stack">
     ${isAdmin() && html`<div class="chips"><button class=${'chip' + (medida === 'qtd' ? ' on' : '')} onClick=${() => setMedida('qtd')}>Quantidade</button>
       <button class=${'chip' + (medida === 'valor' ? ' on' : '')} onClick=${() => setMedida('valor')}>Valor de compra (só produtora)</button></div>`}
-    <div class="card flush tbl-wrap"><table class="tbl pivot"><thead><tr><th>Grupo / categoria</th>${colunas.map((c) => html`<th class="right">${c.id ? c.nome.split(' ')[0] : 'Base'}</th>`)}<th class="right">Total</th></tr></thead>
+    <div class="card flush tbl-wrap"><table class="tbl pivot"><thead><tr><th>Grupo / categoria</th>${colunas.map((c) => html`<th class="right nowrap">${c.id ? html`<${Ponto} cor=${corPessoa(c.id)} />${c.nome.split(' ')[0]}` : 'Base'}</th>`)}<th class="right">Total</th></tr></thead>
       <tbody>${grupos.map((g) => {
         const gi = itens.filter((e) => e.grupo === g);
         const cats = [...new Set(gi.map((e) => e.categoria))].sort((a, b) => a.localeCompare(b, 'pt-BR'));

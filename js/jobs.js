@@ -2,7 +2,7 @@
 import {
   html, useState, useEffect, useMemo, sb, store, useStore, ir, q, acao, toast, confirmar, msgErro, isAdmin,
   fmtData, fmtRelativo, paraLocalInput, deLocalInput, normalizar, TIPOS_KIT,
-  Icone, Badge, Campo, Modal, Vazio, Busca, nomePessoa, pessoasAtivas, carregarTudo, kitPorId,
+  Icone, Badge, Campo, Modal, Vazio, Busca, nomePessoa, pessoasAtivas, carregarTudo, kitPorId, chaveUnidade, agrupar, listaCodigos, Ponto, corPessoa,
 } from './core.js';
 import { SeletorItens, buscarEquip } from './picker.js';
 import { resumoJob, cobertura, conflitos, sugerir, itensDoJob, rotuloRequisito, jobAtivo, modeloDe } from './cobertura.js';
@@ -131,11 +131,13 @@ export function DetalheJob({ id }) {
         <div class="card flush"><div class="card-head" style="padding:14px 16px 0"><h2>Quem leva o quê</h2><span class="small muted">${itens.length} itens</span></div>
           ${!itens.length ? html`<${Vazio} titulo="Nenhum equipamento escolhido">Use "Sugerir equipamentos" para preencher a partir do modelo, ou escolha manualmente.<//>`
           : Object.entries(porPessoa).sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : nomePessoa(a).localeCompare(nomePessoa(b)))).map(([pid, arr]) => html`<div key=${pid}>
-              <div class="li" style="background:var(--surface-2)"><b class="grow">${pid ? nomePessoa(pid) : 'Na base (alguém precisa buscar)'}</b><span class="small muted">${arr.length}</span></div>
-              ${arr.map((i) => html`<a class="li" key=${i.equipamento_id} href=${'#/equipamento/' + i.equipamento_id}>
-                <div class="grow"><div class="t ellipsis">${i.e.nome}</div><div class="s"><span class="mono">${i.e.codigo}</span> · ${i.e.categoria}${i.kit_id ? ' · ' + (kitPorId(i.kit_id)?.nome || '') : ''}${i.e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${i.e.dono_nome}</span>` : ''}
-                  ${confIds.has(i.equipamento_id) ? html` · <span style="color:var(--bad)">também em ${confIds.get(i.equipamento_id).titulo}</span>` : ''}</div></div>
-                ${i.e.status !== 'ok' ? html`<${Badge} e=${i.e} />` : ''}</a>`)}</div>`)}
+              <div class="li" style="background:var(--surface-2)"><b class="grow"><${Ponto} cor=${corPessoa(pid)} />${pid ? nomePessoa(pid) : 'Na base (alguém precisa buscar)'}</b><span class="small muted">${arr.length}</span></div>
+              ${agrupar(arr, (i) => chaveUnidade(i.e) + '|' + (i.kit_id || '') + '|' + i.e.status).map((g) => { const i = g[0]; const conf = g.find((x) => confIds.has(x.equipamento_id));
+                return html`<a class="li" key=${i.equipamento_id} href=${'#/equipamento/' + i.equipamento_id}>
+                ${g.length > 1 && html`<span class="qtd">${g.length}×</span>`}
+                <div class="grow"><div class="t ellipsis">${i.e.nome}</div><div class="s"><span class="mono">${g.length > 1 ? listaCodigos(g.map((x) => x.e), 4) : i.e.codigo}</span> · ${i.e.categoria}${i.kit_id ? ' · ' + (kitPorId(i.kit_id)?.nome || '') : ''}${i.e.dono_id ? html` · <span class="tag-colab">◆ próprio de ${i.e.dono_nome}</span>` : ''}
+                  ${conf ? html` · <span style="color:var(--bad)">também em ${confIds.get(conf.equipamento_id).titulo}</span>` : ''}</div></div>
+                ${i.e.status !== 'ok' ? html`<${Badge} e=${i.e} />` : ''}</a>`; })}</div>`)}
           ${itens.length > 0 && html`<div class="row" style="padding:12px 16px;border-top:1px solid var(--border)">
             <button class="btn sm" onClick=${() => setEntregar(true)}><${Icone} n="saida" s=${15} />Emprestar tudo ao responsável</button>
             <span class="small faint">Registra que os itens ficam com uma pessoa até o fim do job.</span></div>`}

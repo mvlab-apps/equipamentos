@@ -26,9 +26,9 @@ export function Movimentos() {
   const filtrados = (hist || []).filter((m) => normalizar(`${m.numero} ${ROT[m.tipo]} ${nomePessoa(m.para_pessoa_id)} ${m.projeto || ''}`).includes(normalizar(termo)));
 
   return html`<div>
-    <div class="page-head"><div><h1>Movimentações</h1><p>Empréstimos que precisam voltar e o histórico de quem passou o quê para quem.</p></div>
+    <div class="page-head"><div><h1>Movimentações</h1><p>Itens que estão com alguém que não é o titular (empréstimos com data e cessões sem data) e o histórico de quem passou o quê para quem.</p></div>
       <a class="btn primary" href="#/mover"><${Icone} n="saida" s=${16} />Mover itens</a></div>
-    <div class="tabs"><button class=${'tab' + (aba === 'emprestimos' ? ' on' : '')} onClick=${() => setAba('emprestimos')}>Empréstimos em aberto (${emprestados.length})</button>
+    <div class="tabs"><button class=${'tab' + (aba === 'emprestimos' ? ' on' : '')} onClick=${() => setAba('emprestimos')}>Emprestados e cedidos (${emprestados.length})</button>
       <button class=${'tab' + (aba === 'historico' ? ' on' : '')} onClick=${() => setAba('historico')}>Histórico</button></div>
 
     ${aba === 'emprestimos' && html`<div class="stack lg">
@@ -37,10 +37,10 @@ export function Movimentos() {
           <button class="btn sm" onClick=${() => setDevolver(arr)}><${Icone} n="volta" s=${15} />Devolver tudo</button></div>
         <div class="list">${arr.sort((a, b) => (a.emprestimo_ate || 'z').localeCompare(b.emprestimo_ate || 'z')).map((e) => html`<div class="li" key=${e.id}>
           <a class="grow" href=${'#/equipamento/' + e.id} style="color:inherit"><div class="t ellipsis">${e.nome}</div>
-            <div class="s"><span class="mono">${e.codigo}</span> · de ${e.titular_nome || 'base'}${e.emprestimo_projeto ? ' · ' + e.emprestimo_projeto : ''}</div></a>
-          <span class=${'badge ' + (e.atrasado ? 'b-atrasado' : 'b-emprestado')}>${e.emprestimo_ate ? (e.atrasado ? 'venceu ' : 'volta ') + fmtRelativo(e.emprestimo_ate) : 'sem prazo'}</span>
+            <div class="s"><span class="mono">${e.codigo}</span> · pertence a ${e.dono_id ? '◆ ' + e.dono_nome : 'MV LAB' + (e.titular_nome ? ' (responsável: ' + e.titular_nome + ')' : '')}${e.emprestimo_projeto ? ' · ' + e.emprestimo_projeto : ''}</div></a>
+          <span class=${'badge ' + (e.atrasado ? 'b-atrasado' : 'b-emprestado')}>${e.emprestimo_ate ? (e.atrasado ? 'venceu ' : 'volta ') + fmtRelativo(e.emprestimo_ate) : 'cedido · sem data'}</span>
           <button class="btn ghost sm" onClick=${() => setDevolver([e])}>Devolver</button></div>`)}</div></div>`)}
-      ${!emprestados.length && html`<div class="card"><${Vazio} titulo="Nenhum empréstimo em aberto">Tudo está com o titular ou na base.<//></div>`}
+      ${!emprestados.length && html`<div class="card"><${Vazio} titulo="Nada emprestado ou cedido">Tudo está com o titular ou na base.<//></div>`}
     </div>`}
 
     ${aba === 'historico' && html`<div>

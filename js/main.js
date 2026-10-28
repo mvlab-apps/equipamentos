@@ -143,7 +143,7 @@ function Casca({ rota, children }) {
       <a href="#/jobs" class=${ativo('jobs')}><${Icone} n="agenda" />Jobs</a>
       <a href="#/mover" class="fab"><${Icone} n="saida" />Mover</a>
       <a href="#/equipamentos" class=${ativo('equipamentos')}><${Icone} n="caixa" />Itens</a>
-      <a href="#/movimentos" class=${ativo('movimentos')}><${Icone} n="volta" />Empréstimos</a>
+      <a href="#/movimentos" class=${ativo('movimentos')}><${Icone} n="volta" />Emprestados</a>
     </nav>
     ${perfilAberto && html`<${MeuPerfil} onClose=${() => setPerfilAberto(false)} />`}
   </div>`;

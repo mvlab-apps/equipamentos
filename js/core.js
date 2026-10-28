@@ -158,6 +158,46 @@ export function msgErro(e) {
   return m;
 }
 
+// ------------------------------------------------------------------ unidades iguais
+// Itens com o mesmo nome (e o mesmo dono) são unidades do mesmo equipamento: aparecem agrupados como "N×".
+export const chaveUnidade = (e) => normalizar(e?.nome).replace(/\s+/g, ' ').trim() + '|' + (e?.dono_id || '');
+export function agrupar(lista, chaveFn = chaveUnidade) {
+  const m = new Map();
+  for (const x of lista) { const k = chaveFn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+  return [...m.values()];
+}
+export const unidadesDe = (e) => { const k = chaveUnidade(e); return state.equipamentos.filter((x) => x.status !== 'baixado' && chaveUnidade(x) === k); };
+export function listaCodigos(arr, max = 3) {
+  const c = arr.map((e) => e.codigo).sort();
+  return c.length <= max ? c.join(', ') : `${c.slice(0, max).join(', ')} +${c.length - max}`;
+}
+// "3 na base · 2 com Gian"
+export function distribuicao(arr) {
+  const m = new Map();
+  arr.forEach((e) => { const k = e.portador_id || ''; m.set(k, (m.get(k) || 0) + 1); });
+  return [...m.entries()].map(([k, n]) => `${n} ${k ? 'com ' + primeiroNome(nomePessoa(k)) : 'na base'}`).join(' · ');
+}
+
+// ------------------------------------------------------------------ cores por pessoa e "pertence a"
+export const PALETA_PESSOAS = ['#e7b553', '#5b9cf5', '#ef7d5f', '#a483f2', '#62c98b', '#ee8fc0', '#f29b38', '#74c0f0', '#b5d457', '#c8a27a'];
+export const corPessoa = (id) => (id && pessoaPorId(id)?.cor) || null;
+// cor de "a quem o item pertence/é responsável": dono (colaborador) ou titular
+export const corDono = (e) => corPessoa(e.dono_id || e.titular_id);
+export function Ponto({ cor, titulo }) {
+  return html`<span class="ponto" title=${titulo || ''} style=${cor ? `background:${cor}` : ''}></span>`;
+}
+// célula "Pertence a": dono de fato (colaborador ou MV LAB) + responsável quando houver
+export function PertenceA({ e, compacto }) {
+  if (e.dono_id) return html`<span class="nowrap"><${Ponto} cor=${corPessoa(e.dono_id)} /><span class="tag-colab" style="font-size:inherit">◆</span> ${compacto ? primeiroNome(e.dono_nome) : e.dono_nome}</span>`;
+  return html`<span><span class="nowrap"><${Ponto} cor=${corPessoa(e.titular_id)} />MV LAB</span>${e.titular_id ? html`<div class="muted small">${compacto ? primeiroNome(e.titular_nome) : 'responsável: ' + e.titular_nome}</div>` : ''}</span>`;
+}
+// célula "Está com": quem tem o item agora + situação do empréstimo
+export function EstaCom({ e, compacto }) {
+  return html`<span>${e.portador_id ? html`<span class="nowrap"><${Ponto} cor=${corPessoa(e.portador_id)} /><b style="font-weight:550">${compacto ? primeiroNome(e.portador_nome) : e.portador_nome}</b></span>` : html`<span class="muted nowrap"><${Ponto} />Base</span>`}
+    ${e.emprestado && e.portador_id ? html`<div class="small" style=${'color:' + (e.atrasado ? 'var(--bad)' : 'var(--muted)')}>${e.emprestimo_ate ? (e.atrasado ? 'devolução venceu ' : 'devolve ') + fmtData(e.emprestimo_ate) : 'cedido · sem data'}</div>` : ''}
+    ${e.emprestado && !e.portador_id ? html`<div class="small muted">guardado (de ${primeiroNome(e.titular_nome)})</div>` : ''}</span>`;
+}
+
 // status "efetivo" para exibição (inclui reserva vigente hoje e atraso)
 export const primeiroNome = (n) => (n || '?').split(' ')[0];
 export const deColaborador = (e) => !!(e && e.dono_id);
@@ -165,6 +205,7 @@ export function statusExibicao(e) {
   if (e.status && e.status !== 'ok') return { cls: e.status, rot: STATUS[e.status] || e.status };
   if (e.dono_id && !e.emprestado) return { cls: 'colab', rot: (pessoaPorId(e.dono_id)?.externo ? 'Freela · ' : 'Próprio · ') + primeiroNome(e.dono_nome) };
   if (e.atrasado) return { cls: 'atrasado', rot: 'Atrasado' };
+  if (e.emprestado && e.portador_id && !e.emprestimo_ate) return { cls: 'emprestado', rot: 'Cedido a ' + primeiroNome(e.portador_nome) };
   if (e.emprestado && e.portador_id) return { cls: 'emprestado', rot: 'Emprestado' };
   if (e.emprestado && !e.portador_id) return { cls: 'base', rot: 'Na base (de ' + (e.titular_nome || '?') + ')' };
   if (!e.portador_id) return { cls: 'base', rot: 'Na base' };
@@ -183,6 +224,7 @@ const P = {
   equipe: 'M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM21 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8',
   etiqueta: 'M3 3h7l11 11-7 7L3 10zM7.5 7.5h.01',
   mais: 'M12 5v14M5 12h14',
+  copiar: 'M10 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zM5 16H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1',
   busca: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
   x: 'M6 6l12 12M18 6L6 18',
   menu: 'M4 7h16M4 12h16M4 17h16',
@@ -356,4 +398,12 @@ export async function q(promessa) { const { data, error } = await promessa; if (
 export async function acao(fn, sucesso) {
   try { const r = await fn(); if (sucesso) toast(sucesso, 'ok'); recarregarEmBreve(150); return r ?? true; }
   catch (e) { toast(msgErro(e), 'erro'); return false; }
+}
+
+// contador − n + (usado para escolher quantas unidades iguais)
+export function Stepper({ valor, min = 0, max, onChange, rotulo }) {
+  return html`<span class="stepper" onClick=${(ev) => ev.stopPropagation()} title=${rotulo || ''}>
+    <button type="button" aria-label="Menos" disabled=${valor <= min} onClick=${() => onChange(valor - 1)}>−</button>
+    <span>${valor}${max !== undefined ? html`<span class="faint" style="font-weight:400">/${max}</span>` : ''}</span>
+    <button type="button" aria-label="Mais" disabled=${max !== undefined && valor >= max} onClick=${() => onChange(valor + 1)}>+</button></span>`;
 }

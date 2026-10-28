@@ -25,13 +25,13 @@ export function ListaKits() {
   const [form, setForm] = useState(null);
   const lista = st.kits.filter((k) => normalizar(k.nome + ' ' + (k.codigo || '') + ' ' + (k.descricao || '')).includes(normalizar(termo)));
   return html`<div>
-    <div class="page-head"><div><h1>Kits</h1><p>Conjuntos que saem juntos (ex.: luz + tripé + softbox). Ao retirar um kit, todos os itens disponíveis entram na saída.</p></div>
+    <div class="page-head"><div><h1>Kits</h1><p><b>Kit fixo</b>: os itens vão sempre juntos (ex.: microfone + cabo + gravador). <b>Conjunto</b>: itens que costumam andar juntos, mas que podem sair sozinhos (ex.: kit de luz de alguém). Para saber de quem é cada item, use a coluna "Pertence a"; não precisa de kit para isso.</p></div>
       ${isAdmin() && html`<button class="btn primary" onClick=${() => setForm({})}><${Icone} n="mais" s=${16} />Novo kit</button>`}</div>
     <div class="row" style="margin-bottom:14px"><${Busca} valor=${termo} onInput=${setTermo} placeholder="Buscar kit…" /></div>
     <div class="cols" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">
       ${lista.map((k) => { const r = resumoKit(k, st.equipamentos); return html`<a class="card" key=${k.id} href=${'#/kit/' + k.id} style="color:inherit;text-decoration:none">
         <div class="row between nw"><h3 class="ellipsis">${k.nome}</h3><span class=${'badge b-' + r.sit}>${r.rot}</span></div>
-        <div class="small muted" style="margin:4px 0 10px">${k.tipo ? html`<span class="badge b-gold plain">${k.tipo}</span> ` : ''}${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens${k.titular_id ? ' · titular ' + nomePessoa(k.titular_id) : ''}</div>
+        <div class="small muted" style="margin:4px 0 10px"><span class=${'badge plain b-' + (k.modo === 'fixo' ? 'fixo' : 'conjunto')}>${k.modo === 'fixo' ? 'Kit fixo' : 'Conjunto'}</span> ${k.tipo ? html`<span class="badge b-gold plain">${k.tipo}</span> ` : ''}${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens${k.titular_id ? ' · titular ' + nomePessoa(k.titular_id) : ''}</div>
         <div class="small" style="color:var(--muted);line-height:1.6">${r.membros.slice(0, 5).map((e) => e.nome).join(' · ')}${r.membros.length > 5 ? ` · +${r.membros.length - 5}` : ''}</div>
       </a>`; })}
     </div>
@@ -42,17 +42,20 @@ export function ListaKits() {
 
 function FormKit({ inicial, onClose }) {
   const st = useStore();
-  const [f, setF] = useState({ nome: inicial.nome || '', codigo: inicial.codigo || '', descricao: inicial.descricao || '', tipo: inicial.tipo || '' });
+  const [f, setF] = useState({ nome: inicial.nome || '', codigo: inicial.codigo || '', descricao: inicial.descricao || '', tipo: inicial.tipo || '', modo: inicial.modo || 'conjunto' });
   const tipos = [...new Set([...TIPOS_KIT, ...st.kits.map((k) => k.tipo).filter(Boolean)])];
   const salvar = async () => {
     if (!f.nome.trim()) return toast('Informe o nome do kit.', 'erro');
-    const reg = { nome: f.nome.trim(), codigo: f.codigo.trim().toUpperCase() || null, descricao: f.descricao.trim() || null, tipo: f.tipo.trim() || null };
+    const reg = { nome: f.nome.trim(), codigo: f.codigo.trim().toUpperCase() || null, descricao: f.descricao.trim() || null, tipo: f.tipo.trim() || null, modo: f.modo };
     const r = await acao(() => inicial.id ? q(sb.from('kits').update(reg).eq('id', inicial.id).select().single()) : q(sb.from('kits').insert(reg).select().single()), 'Kit salvo.');
     if (r) { await carregarTudo(); onClose(); if (!inicial.id) ir('/kit/' + r.id); }
   };
   return html`<${Modal} titulo=${inicial.id ? 'Editar kit' : 'Novo kit'} onClose=${onClose} rodape=${html`<button class="btn" onClick=${onClose}>Cancelar</button><button class="btn primary" onClick=${salvar}>Salvar</button>`}>
     <div class="stack">
       <${Campo} rotulo="Nome" obrig><input class="input" value=${f.nome} onInput=${(e) => setF({ ...f, nome: e.target.value })} placeholder="Ex.: Kit Luz Amaran 1" autofocus /><//>
+      <div class="stack" style="gap:6px"><span class="small muted">Como o kit se comporta</span>
+        <label class="check"><input type="radio" name="modo" checked=${f.modo === 'fixo'} onChange=${() => setF({ ...f, modo: 'fixo' })} /><span><b>Kit fixo</b> <span class="muted">— vai sempre inteiro. Mover um item move o kit todo.</span></span></label>
+        <label class="check"><input type="radio" name="modo" checked=${f.modo === 'conjunto'} onChange=${() => setF({ ...f, modo: 'conjunto' })} /><span><b>Conjunto</b> <span class="muted">— os itens podem ser emprestados um a um; o quadro mostra o que está fora.</span></span></label></div>
       <${Campo} rotulo="Tipo (usado nos modelos de job)"><input class="input" list="dl-tipokit" value=${f.tipo} onInput=${(e) => setF({ ...f, tipo: e.target.value })} placeholder="Câmera, Luz, Áudio, Podcast…" />
         <datalist id="dl-tipokit">${tipos.map((t) => html`<option value=${t} />`)}</datalist><//>
       <${Campo} rotulo="Código (para etiqueta)"><input class="input mono" value=${f.codigo} onInput=${(e) => setF({ ...f, codigo: e.target.value })} placeholder="Ex.: KIT-LUZ-1" /><//>
@@ -71,6 +74,7 @@ export function DetalheKit({ id }) {
   const k = st.kits.find((x) => x.id === id);
   const [editar, setEditar] = useState(false);
   const [add, setAdd] = useState(false);
+  const [mover, setMover] = useState(false);
   if (!k) return html`<${Vazio} titulo="Kit não encontrado"><a href="#/kits">Voltar</a><//>`;
   const r = resumoKit(k, st.equipamentos);
   const remover = async (e) => { await acao(() => q(sb.from('kit_itens').delete().eq('equipamento_id', e.id).eq('kit_id', k.id)), 'Item removido do kit.'); };
@@ -80,11 +84,10 @@ export function DetalheKit({ id }) {
   };
   const etiqueta = () => imprimir(html`<div class="labels"><div class="label"><span dangerouslySetInnerHTML=${{ __html: qrSvg(urlKit(k.codigo || k.id)) }}></span>
     <div><div class="le">${EMPRESA} · KIT</div><div class="lc">${k.codigo || ''}</div><div class="ln">${k.nome} (${r.membros.length} itens)</div></div></div></div>`);
-  const [mover, setMover] = useState(false);
   return html`<div>
     <a class="crumb" href="#/kits">← Kits</a>
     <div class="page-head"><div><div class="row" style="gap:8px"><h1>${k.nome}</h1><span class=${'badge b-' + r.sit}>${r.rot}</span></div>
-      <p>${k.tipo ? k.tipo + ' · ' : ''}${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens${k.titular_id ? ' · titular ' + nomePessoa(k.titular_id) : ''}${!k.tipo && isAdmin() ? html` · <a href="#" onClick=${(ev) => { ev.preventDefault(); setEditar(true); }}>definir tipo</a>` : ''}</p></div>
+      <p><span class=${'badge plain b-' + (k.modo === 'fixo' ? 'fixo' : 'conjunto')}>${k.modo === 'fixo' ? 'Kit fixo' : 'Conjunto'}</span> ${k.tipo ? k.tipo + ' · ' : ''}${k.codigo ? html`<span class="mono">${k.codigo}</span> · ` : ''}${r.membros.length} itens${k.titular_id ? ' · titular ' + nomePessoa(k.titular_id) : ''}${!k.tipo && isAdmin() ? html` · <a href="#" onClick=${(ev) => { ev.preventDefault(); setEditar(true); }}>definir tipo</a>` : ''}</p></div>
       <div class="row">
         ${r.membros.length > 0 && html`<button class="btn primary" onClick=${() => setMover(true)}><${Icone} n="saida" s=${16} />Mover kit</button>`}
         <button class="btn" onClick=${() => (k.codigo ? etiqueta() : toast('Defina um código para o kit antes de imprimir a etiqueta.', 'erro'))}><${Icone} n="qr" s=${16} />Etiqueta do kit</button>
@@ -95,7 +98,7 @@ export function DetalheKit({ id }) {
     <div class="card flush">
       <div class="card-head" style="padding:14px 16px 0"><h3>Itens do kit</h3>${isAdmin() && html`<button class="btn sm" onClick=${() => setAdd(true)}><${Icone} n="mais" s=${15} />Adicionar itens</button>`}</div>
       <div class="list">${r.membros.map((e) => html`<div class="li" key=${e.id}>
-        <a class="grow" href=${'#/equipamento/' + e.id} style="color:inherit"><div class="t">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span>${' · ' + (e.portador_nome ? 'com ' + e.portador_nome : 'na base')}</div></a>
+        <a class="grow" href=${'#/equipamento/' + e.id} style="color:inherit"><div class="t">${e.nome}</div><div class="s"><span class="mono">${e.codigo}</span> · está com ${e.portador_nome || 'a base'}${e.emprestado && e.portador_id ? (e.emprestimo_ate ? ' (emprestado)' : ' (cedido)') : ''} · pertence a ${e.dono_id ? '◆ ' + e.dono_nome : 'MV LAB'}</div></a>
         <${Badge} e=${e} />
         ${isAdmin() && html`<button class="btn ghost sm icon" aria-label="Remover do kit" onClick=${() => remover(e)}><${Icone} n="x" s=${15} /></button>`}</div>`)}
         ${!r.membros.length && html`<${Vazio} titulo="Kit vazio">Adicione os equipamentos que compõem este kit.<//>`}</div>
