@@ -79,6 +79,11 @@ function Acesso() {
   const pend = st.perfis.filter((p) => !p.ativo);
   const ativos = st.perfis.filter((p) => p.ativo);
   const upd = (p, patch, msg) => acao(() => q(sb.from('perfis').update(patch).eq('id', p.id)), msg);
+  // recusar = apagar a conta (a pessoa pode pedir de novo criando outra conta)
+  const recusar = async (p) => {
+    if (!(await confirmar(`Recusar o acesso de ${p.nome || p.email}?\nA conta é apagada. Se a pessoa se cadastrar de novo, o pedido volta a aparecer aqui.`, { perigo: true, ok: 'Recusar e apagar conta' }))) return;
+    if (await acao(() => q(sb.rpc('recusar_acesso', { p_id: p.id })), 'Acesso recusado e conta apagada.')) await carregarTudo();
+  };
   const salvarCfg = () => acao(() => q(sb.from('config').upsert([{ chave: 'dominio_auto_aprovado', valor: cfg.dominio.trim().replace(/^@/, '') }, { chave: 'prefixo_codigo', valor: cfg.prefixo.trim().toUpperCase() || 'MV' }])), 'Configurações salvas.');
   const Linha = ({ p }) => html`<tr key=${p.id}>
     <td><div style="font-weight:550">${p.nome || '—'}${p.id === st.perfil.id ? html` <span class="badge b-gold plain">você</span>` : ''}</div><div class="small muted">${p.email}</div></td>
@@ -87,7 +92,9 @@ function Acesso() {
       <option value="membro">Membro</option><option value="admin">Administrador</option></select></td>
     <td class="right">${p.ativo
       ? html`<button class="btn ghost sm" disabled=${p.id === st.perfil.id} onClick=${async () => (await confirmar(`Bloquear o acesso de ${p.nome || p.email}?`, { perigo: true, ok: 'Bloquear' })) && upd(p, { ativo: false }, 'Acesso bloqueado.')}>Bloquear</button>`
-      : html`<button class="btn primary sm" onClick=${() => upd(p, { ativo: true }, 'Acesso aprovado.')}><${Icone} n="check" s=${15} />Aprovar</button>`}</td></tr>`;
+      : html`<div class="row nw" style="justify-content:flex-end;gap:6px">
+          <button class="btn ghost sm" onClick=${() => recusar(p)}>Recusar</button>
+          <button class="btn primary sm" onClick=${() => upd(p, { ativo: true }, 'Acesso aprovado.')}><${Icone} n="check" s=${15} />Aprovar</button></div>`}</td></tr>`;
   return html`<div class="stack lg">
     <p class="muted" style="margin:0">Membros movem equipamentos, editam jobs e modelos. Administradores também cadastram itens, kits, valores, notas fiscais e pessoas.</p>
     ${pend.length > 0 && html`<div class="card flush"><div class="card-head" style="padding:14px 16px 0"><h2>Aguardando aprovação</h2></div>
